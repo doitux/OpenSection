@@ -104,7 +104,7 @@ void OpenSectionEditor::paint(Graphics& g)
     g.drawText("OpenSection", Rectangle<float>(20 * s, 10 * s, 300 * s, 30 * s), Justification::left);
     g.setColour(col::dim);
     g.setFont(FontOptions(12.f * s));
-    g.drawText("computed string section", Rectangle<float>(22 * s, 36 * s, 300 * s, 14 * s), Justification::left);
+    g.drawText(String::fromUTF8("computed string section  \xc2\xb7  v" JucePlugin_VersionString), Rectangle<float>(22 * s, 36 * s, 400 * s, 14 * s), Justification::left);
     g.drawText(status, Rectangle<float>(540 * s, 16 * s, 380 * s, 16 * s), Justification::right);
     // expression meter
     const auto m = Rectangle<float>(800 * s, 38 * s, 120 * s, 5 * s);
