@@ -14,7 +14,7 @@ jobs:
         include:
           - { os: ubuntu-24.04, name: linux-x86_64, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_LV2 OpenSection_Standalone opensection-render" }
           - { os: windows-2022, name: windows-x64, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_Standalone opensection-render" }
-          - { os: macos-14, name: macos-universal, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_AU OpenSection_Standalone opensection-render" }
+          - { os: macos-15, name: macos-universal, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_AU OpenSection_Standalone opensection-render" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
