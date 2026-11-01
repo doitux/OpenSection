@@ -7,7 +7,7 @@
 // notes.txt lines:  <on_s> <off_s> <midi> <velocity 0..1>
 //                   cc <time_s> <64|11> <value 0..1>        (sustain / expression)
 // options: --model file.osm  --sr 48000  --block 128  --seed N  --dry  --quality q
-//          --unrest r0,r1,r2,r3  --room er,late  --tail seconds
+//          --unrest r0,r1,r2,r3  --room er,late  --release scale,rt60,hfratio  --tail seconds
 #include "opensection/Engine.h"
 #include <algorithm>
 #include <chrono>
@@ -69,7 +69,7 @@ int main(int argc, char** argv)
 {
     std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
     bool dry = false, bench = false; float quality = 1.0f, tail = 4.0f;
-    float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1;
+    float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -84,6 +84,7 @@ int main(int argc, char** argv)
         else if (a == "--tail") tail = (float)std::atof(next());
         else if (a == "--unrest") std::sscanf(next(), "%f,%f,%f,%f", &unrest[0], &unrest[1], &unrest[2], &unrest[3]);
         else if (a == "--room") std::sscanf(next(), "%f,%f", &er, &late);
+        else if (a == "--release") std::sscanf(next(), "%f,%f,%f", &rel, &rt60, &hf);
         else pos.push_back(argv[i]);
     }
     if (pos.size() < (bench ? 1u : 2u)) { std::fprintf(stderr, "usage: see source header\n"); return 2; }
@@ -103,6 +104,7 @@ int main(int argc, char** argv)
     eng.setParams(p);
     for (int r = 0; r < 4; ++r) if (unrest[r] >= 0) eng.setUnrestOverride(r, unrest[r]);
     if (er >= 0) eng.setRoomOverride(er, late);
+    if (rel >= 0) eng.setReleaseOverride(rel, rt60, hf);
 
     const long total = (long)((end + tail) * sr);
     std::vector<float> L, R; if (!bench) { L.reserve(total); R.reserve(total); }

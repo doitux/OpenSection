@@ -62,6 +62,8 @@ Model Model::fromText(const std::string& text, std::string* error)
         } else if (tok == "er") { in >> m.erGain;
         } else if (tok == "late") { in >> m.lateGain;
         } else if (tok == "out") { in >> m.outGain;
+        } else if (tok == "release") { in >> m.release;
+        } else if (tok == "hall") { in >> m.hallRt60 >> m.hallHf;
         } else return fail("unknown token in model");
     }
     if (m.bandHz.empty() || m.keys.empty()) return fail("model incomplete");
@@ -82,6 +84,7 @@ std::string Model::toText() const
     }
     o << "unrest"; for (float u : unrest) o << ' ' << u; o << '\n';
     o << "er " << erGain << "\nlate " << lateGain << "\nout " << outGain << '\n';
+    o << "release " << release << "\nhall " << hallRt60 << ' ' << hallHf << '\n';
     return o.str();
 }
 

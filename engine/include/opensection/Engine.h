@@ -48,6 +48,7 @@ public:
     void setParams(const Params& p);                    // real-time safe
     void setUnrestOverride(int reg, float db);          // for learning
     void setRoomOverride(float er, float late);         // for learning
+    void setReleaseOverride(float release, float rt60, float hf);   // for learning (not real-time safe)
     // real-time: events must be sorted by offset
     void process(float* left, float* right, int numSamples, const Event* events, int numEvents);
     void reset();

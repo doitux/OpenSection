@@ -92,6 +92,7 @@ struct Player {
     float vibRate = 5, vibDepth = 10, vibPhase = 0, vibOn = 0.4f;
     float start = 0, att = 0.5f;
     float nextChange = 1e9f, lastChange = -1e9f;
+    float scoop = 0;                                  // intonation at the entry, settles quickly (cents)
     WanderState drift, rateJit, slowLvl, unrest;
     float hpX = 0, hpY = 0, lpY = 0;                  // rosin-noise filters
     float inc = 0, amp = 0, mix = 0, noise = 0;       // values at chunk start
@@ -105,6 +106,8 @@ struct Voice {
     bool stealing = false;
     double t = 0;                                     // seconds since note-on
     uint64_t age = 0;
+    // the section listens to itself: part of the vibrato is shared, and every note is a bit different
+    float secPhase = 0, secRate = 5.f, noteGain = 1.f, noteTone = 0.f;
     std::array<Player, kMaxPlayers> pl;
 };
 
@@ -178,7 +181,8 @@ struct Engine::Impl {
     std::array<Desk, kBuses> desks;
     Hall hall;
     std::array<float, kNumRegisters> unrestDb {};
-    float erGain = 0, lateGain = 0;
+    float erGain = 0, lateGain = 0, releaseScale = 1.f;
+    Diffuser erDiffL, erDiffR;
     bool sustain = false;
     float expression = 1.f, exprSmooth = 1.f, bend = 1.f;
 
@@ -296,6 +300,10 @@ struct Engine::Impl {
         xorshift(s); xorshift(s);
         const int base = kReg[v.reg].players;
         v.nPlayers = std::clamp((int)std::lround(base * p.quality), 2, std::min(base, kMaxPlayers));
+        v.secRate = 4.9f + 0.9f * urand(s);
+        v.secPhase = 6.2831853f * urand(s);
+        v.noteGain = std::pow(10.f, 1.2f * gauss(s) / 20.f);
+        v.noteTone = 0.07f * gauss(s);
         int deskOrder[kDesks] = { 0, 1, 2, 3 };
         for (int i = kDesks - 1; i > 0; --i) std::swap(deskOrder[i], deskOrder[xorshift(s) % (i + 1)]);
         for (int i = 0; i < v.nPlayers; ++i) {
@@ -309,7 +317,8 @@ struct Engine::Impl {
             pl.vibDepth = 7.f + 13.f * urand(pl.rng);
             pl.vibPhase = 6.2831853f * urand(pl.rng);
             pl.vibOn = 0.25f + 0.45f * urand(pl.rng);
-            pl.start = 0.06f * urand(pl.rng);
+            pl.start = (0.03f + 0.07f * (1.f - vel)) * urand(pl.rng);       // soft notes: looser entries
+            pl.scoop = 9.f * gauss(pl.rng) - 3.f;
             pl.att = 0.35f + 0.45f * urand(pl.rng);
             pl.nextChange = pl.start + 1.5f + 3.f * urand(pl.rng);
             pl.drift.warm(wDrift, pl.rng, 40); pl.rateJit.warm(wRate, pl.rng, 20);   // short warm-up: cheap note-on
@@ -341,7 +350,10 @@ struct Engine::Impl {
         pl.vibPhase += 6.2831853f * rate * dt;
         if (pl.vibPhase > 6.2831853f) pl.vibPhase -= 6.2831853f;
         const float ramp = std::clamp(((float)t - pl.vibOn) / 0.9f, 0.f, 1.f);
-        const float cents = pl.det + drift + p.vibrato * pl.vibDepth * ramp * std::sin(pl.vibPhase);
+        constexpr float kShared = 0.4f;                      // how much the players follow each other
+        const float vib = (1.f - kShared) * std::sin(pl.vibPhase) + kShared * std::sin(v.secPhase);
+        const float tIn = std::max(0.f, (float)t - pl.start);
+        const float cents = pl.det + drift + pl.scoop * std::exp(-tIn / 0.12f) + p.vibrato * pl.vibDepth * ramp * vib;
         const float f0 = 440.f * std::pow(2.f, (v.key - 69) / 12.f + cents / 1200.f) * bend;
         inc = f0 / (float)sr;
 
@@ -366,10 +378,10 @@ struct Engine::Impl {
         const float velAmp = std::pow(std::max(v.vel, 0.02f) / 0.85f, 2.f * p.velocity);   // headroom for hard chords
         const float ex = exprSmooth;
         const float exAmp = ex * std::sqrt(ex);                  // pedal fully up = silent (fade pads in/out)
-        amp = env * velAmp * exAmp * v.rel * v.steal / std::sqrt((float)v.nPlayers);
+        amp = env * velAmp * exAmp * v.noteGain * v.rel * v.steal / std::sqrt((float)v.nPlayers);
 
         const float pressure = std::clamp(v.vel * (0.45f + 0.55f * ex), 0.f, 1.f);
-        mix = std::clamp((pressure - 0.3f) / 0.7f, 0.f, 1.f);
+        mix = std::clamp((pressure - 0.3f) / 0.7f + v.noteTone, 0.f, 1.f);
 
         float scratch = 0.25f;
         if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
@@ -390,7 +402,9 @@ struct Engine::Impl {
             const float* th = table(tabHard, v.key);
             const float lpA = std::exp(-2.f * (float)M_PI * (2500.f + 6000.f * v.vel) / (float)sr);
             v.t += chunkDur;
-            if (v.released) v.rel *= std::exp(-chunkDur / (0.22f * p.release));
+            v.secPhase += 6.2831853f * v.secRate * chunkDur;
+            if (v.secPhase > 6.2831853f) v.secPhase -= 6.2831853f;
+            if (v.released) v.rel *= std::exp(-chunkDur / (0.22f * releaseScale * p.release));
             if (v.stealing) v.steal *= std::exp(-chunkDur / 0.012f);
             for (int i = 0; i < v.nPlayers; ++i) {
                 Player& pl = v.pl[i];
@@ -458,8 +472,8 @@ struct Engine::Impl {
         }
         const float eg = erGain * p.roomMic, lg = lateGain * p.hall, cg = p.closeMic;
         for (int n = 0; n < kChunk; ++n) {                     // walls swallow highs
-            erLpL += erLpA * (erL[n] - erLpL); erL[n] = erLpL;
-            erLpR += erLpA * (erR[n] - erLpR); erR[n] = erLpR;
+            erLpL += erLpA * (erL[n] - erLpL); erL[n] = erDiffL.process(erLpL);   // dense, not comb-like
+            erLpR += erLpA * (erR[n] - erLpR); erR[n] = erDiffR.process(erLpR);
             late[n] = 0.5f * ((dryL[n] + eg * erL[n]) + (dryR[n] + eg * erR[n]));
             outL[n] = cg * dryL[n] + eg * erL[n];
             outR[n] = cg * dryR[n] + eg * erR[n];
@@ -485,7 +499,10 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->erGain = d->model.erGain; d->lateGain = d->model.lateGain;
     d->buildTables();
     d->buildDesks();
-    d->hall.prepare(sampleRate);
+    d->hall.prepare(sampleRate, d->model.hallRt60, d->model.hallHf);
+    d->releaseScale = d->model.release;
+    d->erDiffL.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);
+    d->erDiffR.prepare(sampleRate, { 3.7f, 4.9f, 8.3f, 10.7f }, 0.6f);
     d->erLpA = 1.f - std::exp(-2.f * (float)M_PI * 5000.f / (float)sampleRate);
     d->fifoL.assign((size_t)maxBlock + kChunk, 0.f); d->fifoR.assign((size_t)maxBlock + kChunk, 0.f);
     reset();
@@ -500,12 +517,17 @@ void Engine::setParams(const Params& p)
 
 void Engine::setUnrestOverride(int reg, float db) { if (reg >= 0 && reg < kNumRegisters) d->unrestDb[reg] = db; }
 void Engine::setRoomOverride(float er, float late) { d->erGain = er; d->lateGain = late; }
+void Engine::setReleaseOverride(float release, float rt60, float hf)
+{
+    d->releaseScale = release;
+    d->hall.prepare(d->sr, rt60, hf);
+}
 
 void Engine::reset()
 {
     for (auto& v : d->voices) v.active = false;
     for (auto& ds : d->desks) { ds.body.clear(); std::fill(ds.ring.begin(), ds.ring.end(), 0.f); }
-    d->hall.clear();
+    d->hall.clear(); d->erDiffL.clear(); d->erDiffR.clear();
     d->fifoN = 0; d->sustain = false;
 }
 

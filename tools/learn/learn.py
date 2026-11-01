@@ -109,13 +109,17 @@ class EngineRunner:
         return read_wav(wp)
 
 
+HALL = {"release": 1.0, "rt60": 2.4, "hf": 0.45}       # learned release + hall decay
+
+
 def model_text(curves, unrest, er, late, out=1.0):
     lines = ["OSM1", "# learned by tools/learn/learn.py from Virtual Playing Orchestra (all-strings-SEC-sustain)",
              "bands %d %s" % (len(BANDS), " ".join("%.3f" % b for b in BANDS))]
     for k in KEYS:
         lines.append("key %d %s" % (k, " ".join("%.2f" % v for v in curves[k])))
     lines.append("unrest " + " ".join("%.3f" % u for u in unrest))
-    lines += ["er %.4f" % er, "late %.4f" % late, "out %.4f" % out]
+    lines += ["er %.4f" % er, "late %.4f" % late, "out %.4f" % out,
+              "release %.3f" % HALL["release"], "hall %.3f %.3f" % (HALL["rt60"], HALL["hf"])]
     return "\n".join(lines) + "\n"
 
 
@@ -190,16 +194,47 @@ def main():
     sus, tl = slice(int(2 * SR), int((last - 0.5) * SR)), slice(int((last + 0.3) * SR), int((last + 2.5) * SR))
     W, T = width(ref, sus), tail_db(ref, sus, tl)
     print(f"  Ziel: Breite {W:.2f}, Nachhall nach Loslassen {T:.1f} dB")
-    best = None
-    for e in np.linspace(0.2, 2.0, 10):                    # some room mic always (depth; user can scale it)
-        for l in np.linspace(0, 1.2, 13):
-            y = eng.render(model_text(curves, unrest, e, l), prog, seed=3, tail=4)
-            w, t = width(y, sus), tail_db(y, sus, tl)
-            c = (w - W) ** 2 * 100 + (t - T) ** 2 / 4
-            if best is None or c < best[0]:
-                best = (c, e, l, w, t)
-    _, er, late, w, t = best
+    def room_grid(ers, lates):
+        best = None
+        for e in ers:
+            for l in lates:
+                y = eng.render(model_text(curves, unrest, e, l), prog, seed=3, tail=4)
+                w, t = width(y, sus), tail_db(y, sus, tl)
+                c = (w - W) ** 2 * 100 + (t - T) ** 2 / 4
+                if best is None or c < best[0]:
+                    best = (c, e, l, w, t)
+        return best
+
+    _, er, late, w, t = room_grid(np.linspace(0.2, 2.0, 10), np.linspace(0, 1.2, 13))   # some room mic always
     print(f"  Raum: frühe Reflexionen {er:.2f}, Hall {late:.2f} → Breite {w:.2f}, Nachhall {t:.1f} dB")
+
+    # 3b) the release: how the sound dies after the keys are let go (3 bands, 50 ms steps)
+    DEC_BANDS = [butter(4, [lo / (SR / 2), hi / (SR / 2)], "band", output="sos") for lo, hi in ((250, 1000), (1000, 4000), (4000, 10000))]
+    def decay(x):
+        m = x.mean(0); out = []
+        for sos in DEC_BANDS:
+            y = sosfilt(sos, m)
+            ref_e = (y[sus] ** 2).mean() + 1e-20
+            hop = int(0.05 * SR); t0 = int(last * SR)
+            out.append([10 * np.log10((y[t0 + i * hop: t0 + (i + 1) * hop] ** 2).mean() / ref_e + 1e-12) for i in range(44)])
+        return np.array(out)
+    D_ref = decay(ref)
+    valid = D_ref > -55
+    print("  Ziel-Ausklang: −30 dB nach %.0f ms (mittleres Band)" % (50 * np.argmax(D_ref[1] < -30)))
+    best = None
+    for rel in (0.6, 1.0, 1.6, 2.5, 4.0):
+        for rt in (1.2, 1.8, 2.4, 3.0):
+            for hf in (0.35, 0.6):
+                HALL.update(release=rel, rt60=rt, hf=hf)
+                y = eng.render(model_text(curves, unrest, er, late), prog, seed=3, tail=4)
+                c = np.mean(np.abs(decay(y) - D_ref)[valid])
+                if best is None or c < best[0]:
+                    best = (c, rel, rt, hf)
+    c, rel, rt, hf = best
+    HALL.update(release=rel, rt60=rt, hf=hf)
+    print(f"  Ausklang: Spieler ×{rel:.1f}, Hall {rt:.1f} s, Höhen ×{hf:.2f} → Abweichung {c:.1f} dB")
+    _, er, late, w, t = room_grid(np.clip(er + np.linspace(-0.3, 0.3, 5), 0.2, 2.0), np.clip(late + np.linspace(-0.2, 0.2, 5), 0, 1.5))
+    print(f"  Raum nachgeeicht: frühe Reflexionen {er:.2f}, Hall {late:.2f} → Breite {w:.2f}, Nachhall {t:.1f} dB")
 
     # 4) overall colour of the complete sound (close + room + hall) against the reference:
     #    one gentle correction shared by all keys, two rounds
