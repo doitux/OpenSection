@@ -17,9 +17,10 @@ static float interpLog(const std::vector<float>& xs, const std::vector<float>& y
     return ys[i - 1] + w * (ys[i] - ys[i - 1]);
 }
 
-float Model::colourDb(int midi, float hz) const
+static float interpKeys(const std::vector<int>& keys, const std::vector<float>& bandHz,
+                        const std::vector<std::vector<float>>& curves, int midi, float hz)
 {
-    if (keys.empty()) return 0.f;
+    if (keys.empty() || curves.size() != keys.size()) return 0.f;
     if (midi <= keys.front()) return interpLog(bandHz, curves.front(), hz);
     if (midi >= keys.back()) return interpLog(bandHz, curves.back(), hz);
     auto it = std::upper_bound(keys.begin(), keys.end(), midi);
@@ -27,6 +28,9 @@ float Model::colourDb(int midi, float hz) const
     float w = float(midi - keys[i - 1]) / float(keys[i] - keys[i - 1]);
     return (1 - w) * interpLog(bandHz, curves[i - 1], hz) + w * interpLog(bandHz, curves[i], hz);
 }
+
+float Model::colourDb(int midi, float hz) const { return interpKeys(keys, bandHz, curves, midi, hz); }
+float Model::dynDb(size_t node, int midi, float hz) const { return interpKeys(keys, bandHz, dynNodes[node].curves, midi, hz); }
 
 Model Model::flat()
 {
@@ -66,9 +70,24 @@ Model Model::fromText(const std::string& text, std::string* error)
         } else if (tok == "hall") { in >> m.hallRt60 >> m.hallHf;
         } else if (tok == "erdiff") { in >> m.erDiffuse;
         } else if (tok == "spacing") { in >> m.spacing;
+        } else if (tok == "dyn") { in >> m.dynLoud >> m.dynSoft;
+        } else if (tok == "noisesoft") { for (auto& f : m.noiseSoftHz) in >> f;
+        } else if (tok == "dynnode") {
+            m.dynNodes.emplace_back(); in >> m.dynNodes.back().vel;
+        } else if (tok == "dk") {                          // curve of the latest node, keys in order
+            int k; in >> k;
+            if (m.dynNodes.empty()) return fail("dk before dynnode");
+            auto& c = m.dynNodes.back().curves;
+            c.emplace_back(m.bandHz.size());
+            for (auto& v : c.back()) in >> v;
+            if (c.size() > m.keys.size() || m.keys[c.size() - 1] != k) return fail("dynamics curves do not match the keys");
         } else return fail("unknown token in model");
     }
     if (m.bandHz.empty() || m.keys.empty()) return fail("model incomplete");
+    bool okDyn = true;
+    for (auto& n : m.dynNodes)
+        okDyn = okDyn && n.curves.size() == m.keys.size() && std::fabs(n.vel - m.dynLoud) > 0.02f;
+    if (!okDyn) { m.dynNodes.clear(); m.noiseSoftHz = {}; }
     return m;
 }
 
@@ -88,6 +107,18 @@ std::string Model::toText() const
     o << "er " << erGain << "\nlate " << lateGain << "\nout " << outGain << '\n';
     o << "release " << release << "\nhall " << hallRt60 << ' ' << hallHf << '\n';
     o << "erdiff " << erDiffuse << "\nspacing " << spacing << '\n';
+    if (!dynNodes.empty()) {
+        o << "dyn " << dynLoud << ' ' << dynSoft << '\n';
+        o << "noisesoft"; for (float f : noiseSoftHz) o << ' ' << f; o << '\n';
+        for (auto& n : dynNodes) {
+            o << "dynnode " << n.vel << '\n';
+            for (size_t i = 0; i < keys.size(); ++i) {
+                o << "dk " << keys[i];
+                for (float v : n.curves[i]) o << ' ' << std::round(v * 100.f) / 100.f;
+                o << '\n';
+            }
+        }
+    }
     return o.str();
 }
 

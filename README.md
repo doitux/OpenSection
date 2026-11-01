@@ -25,8 +25,14 @@ recordings.
    the desk, mic spacing, hall decay and the release are calibrated against the reference.
 5. **Learned fingerprint.** A learning tool plays the engine against a sampled section (key by key,
    closed loop) and stores only the tone-colour curve per key, the unrest per register, and the
-   room calibration (stereo width and reverb energy) – about 16 KB.
-6. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
+   room calibration (stereo width and reverb energy) – about 22 KB.
+6. **Learned dynamics.** Two more sources teach how the colour changes with bow pressure: a section
+   with recorded soft and loud layers (VSCO2-CE) and solo players from pianissimo to fortissimo
+   (Philharmonia Orchestra). The engine keeps one wavetable set per learned level
+   (pp · soft · loud · ff); key velocity and the expression pedal glide between them – soft
+   playing gets darker and the bow noise softer, fortissimo brighter. Still only two table reads
+   per sample, and the loud colour stays exactly as learned.
+7. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
    and an FDN hall.
 
 ### Real-time design
@@ -69,6 +75,11 @@ cmake --build build
 python3 tools/learn/learn.py --vpo <Virtual-Playing-Orchestra> --sfizz-render <sfizz_render> \
     --engine build/opensection-render --reference <progression.wav> --notes <progression.txt> \
     --out models/opensection.osm
+python3 tools/learn/sources/vsco2_sfz.py <VSCO-2-CE> vsco2-strings.sfz
+python3 tools/learn/sources/philharmonia.py <Philharmonia download>/Strings philharmonia-dyn.npz
+python3 tools/learn/learn_dynamics.py --model models/opensection.osm --sfz vsco2-strings.sfz \
+    --philharmonia philharmonia-dyn.npz --sfizz-render <sfizz_render> \
+    --engine build/opensection-render --out models/opensection.osm
 python3 tools/learn/embed.py
 ```
 
@@ -78,6 +89,12 @@ The shipped model was learned from **Virtual Playing Orchestra** by Paul Batters
 (<http://virtualplaying.com>), which combines Sonatina Symphonic Orchestra, No Budget Orchestra,
 Mattias Westlund's and VSCO2-CE string samples. OpenSection contains no audio from these libraries –
 only derived statistics (spectral envelopes per key, modulation depth, room width and decay).
+
+The dynamics (how soft playing differs in colour from loud playing) were learned from
+**VSCO2 Community Edition** by Versilian Studios (<https://vis.versilstudios.com/vsco-community.html>,
+CC0) and from the **Philharmonia Orchestra sound samples** (<https://philharmonia.co.uk/resources/sound-samples/>,
+CC BY-SA 3.0; sound samples © Philharmonia Orchestra). Again only difference curves are stored, no
+audio. Details in [CREDITS.md](CREDITS.md).
 
 ## License
 

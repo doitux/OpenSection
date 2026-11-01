@@ -51,7 +51,7 @@ jobs:
           [ -d $A/AU ] && cp -R $A/AU/OpenSection.component dist/OpenSection/ || true
           cp -R $A/Standalone/* dist/OpenSection/
           [ "$RUNNER_OS" = "Linux" ] && cp packaging/linux/install.sh dist/OpenSection/ || true
-          cp LICENSE README.md dist/OpenSection/
+          cp LICENSE README.md CREDITS.md dist/OpenSection/
       - uses: actions/upload-artifact@v4
         with:
           name: OpenSection-${{ matrix.name }}

@@ -178,7 +178,8 @@ struct Engine::Impl {
     uint32_t seed;
     uint64_t ageCounter = 0;
 
-    std::vector<float> tabSoft, tabHard;              // [key][kTableLen+1]
+    std::vector<std::vector<float>> tabs;             // one table set per bow pressure: [key][kTableLen+1]
+    std::vector<float> tabQ;                          // bow pressure of each set, ascending
     std::array<float, 128> keyGain {};                 // table RMS relative to a plain saw
     Wander wDrift, wRate, wSlow, wUnrest;
     std::array<Voice, kMaxVoices> voices;
@@ -207,31 +208,47 @@ struct Engine::Impl {
     void buildTables()
     {
         const int nKeys = kKeyHi - kKeyLo + 1;
-        tabSoft.assign((size_t)nKeys * (kTableLen + 1), 0.f);
-        tabHard.assign((size_t)nKeys * (kTableLen + 1), 0.f);
         Fft fft(kTableLen);
         std::vector<float> re(kTableLen), im(kTableLen);
         const float fmax = std::min(18000.f, 0.45f * (float)sr / 1.15f);    // room for vibrato + bend
+        // table sets: analytic (pressure 0.3 and 1.0) or one per learned dynamic level
+        struct Lvl { float q; int node; };                 // node -1: the learned (loud) colour itself
+        std::vector<Lvl> lv;
+        if (!model.dynNodes.empty()) {
+            lv.push_back({ model.dynLoud, -1 });
+            for (size_t i = 0; i < model.dynNodes.size(); ++i) lv.push_back({ model.dynNodes[i].vel, (int)i });
+            std::sort(lv.begin(), lv.end(), [](const Lvl& a, const Lvl& b) { return a.q < b.q; });
+        } else lv = { { 0.3f, -2 }, { 1.0f, -3 } };
+        tabQ.clear(); for (auto& l : lv) tabQ.push_back(l.q);
+        tabs.assign(lv.size(), std::vector<float>((size_t)nKeys * (kTableLen + 1), 0.f));
+        const float m0 = std::clamp((model.dynLoud - 0.3f) / 0.7f, 0.f, 1.f);
+        std::vector<float> amp;
         for (int key = kKeyLo; key <= kKeyHi; ++key) {
             const float f0 = 440.f * std::pow(2.f, (key - 69) / 12.f);
             const int nh = std::min(kTableLen / 2 - 1, (int)(fmax / f0));
-            for (int which = 0; which < 2; ++which) {
-                const float pr = which == 0 ? 0.3f : 1.0f;           // bow pressure of this table
-                const float fc = 2500.f + 6000.f * pr;
-                std::fill(re.begin(), re.end(), 0.f); std::fill(im.begin(), im.end(), 0.f);
+            double eRef = 0;
+            for (size_t t = 0; t < lv.size(); ++t) {
+                amp.assign(nh + 1, 0.f);
                 for (int h = 1; h <= nh; ++h) {
                     const float f = h * f0;
-                    const float lp = 1.f / std::sqrt(1.f + std::pow(f / fc, 4.f));
-                    const float a = (2.f / (float)M_PI) / h * lp * std::pow(10.f, model.colourDb(key, f) / 20.f);
-                    im[h] = -a / 2.f; im[kTableLen - h] = a / 2.f;
+                    const float base = (2.f / (float)M_PI) / h * std::pow(10.f, model.colourDb(key, f) / 20.f);
+                    // analytic tables: soft = bow pressure 0.3, hard = 1.0 (gentle low-pass tilt)
+                    const float aS = base / std::sqrt(1.f + std::pow(f / 4300.f, 4.f));
+                    const float aH = base / std::sqrt(1.f + std::pow(f / 8500.f, 4.f));
+                    if (t == 0) eRef += 0.5 * (double)aH * aH;
+                    const float c = aS + m0 * (aH - aS);           // what the loud colour was learned with
+                    const int node = lv[t].node;
+                    amp[h] = node == -2 ? aS : node == -3 ? aH : node == -1 ? c
+                           : c * std::pow(10.f, std::clamp(model.dynDb((size_t)node, key, f), -40.f, 8.f) / 20.f);
                 }
+                std::fill(re.begin(), re.end(), 0.f); std::fill(im.begin(), im.end(), 0.f);
+                for (int h = 1; h <= nh; ++h) { im[h] = -amp[h] / 2.f; im[kTableLen - h] = amp[h] / 2.f; }
                 fft.transform(re.data(), im.data(), true);
-                float* dst = &(which == 0 ? tabSoft : tabHard)[(size_t)(key - kKeyLo) * (kTableLen + 1)];
-                double e = 0;
-                for (int i = 0; i < kTableLen; ++i) { dst[i] = re[i]; e += (double)re[i] * re[i]; }
+                float* dst = &tabs[t][(size_t)(key - kKeyLo) * (kTableLen + 1)];
+                for (int i = 0; i < kTableLen; ++i) dst[i] = re[i];
                 dst[kTableLen] = dst[0];
-                if (which == 1) keyGain[key] = (float)std::sqrt(e / kTableLen) / 0.57735f;
             }
+            keyGain[key] = (float)std::sqrt(eRef) / 0.57735f;            // rosin noise follows the loud colour
         }
     }
 
@@ -395,7 +412,7 @@ struct Engine::Impl {
         amp = env * velAmp * exAmp * v.noteGain * v.rel * v.steal / std::sqrt((float)v.nPlayers);
 
         const float pressure = std::clamp(v.vel * (0.45f + 0.55f * ex), 0.f, 1.f);
-        mix = std::clamp((pressure - 0.3f) / 0.7f + v.noteTone, 0.f, 1.f);
+        mix = std::clamp(pressure + 0.7f * v.noteTone, tabQ.front(), tabQ.back());   // bow pressure -> table sets
 
         float scratch = 0.25f;
         if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
@@ -412,9 +429,17 @@ struct Engine::Impl {
         const float hpA = std::exp(-2.f * (float)M_PI * 2000.f / (float)sr);
         for (auto& v : voices) {
             if (!v.active) continue;
-            const float* ts = table(tabSoft, v.key);
-            const float* th = table(tabHard, v.key);
-            const float lpA = std::exp(-2.f * (float)M_PI * (2500.f + 6000.f * v.vel) / (float)sr);
+            // rosin noise gets darker with less bow pressure; below the learning velocity the
+            // learned corner (per register) is approached exponentially
+            const float pressure = v.vel * (0.45f + 0.55f * exprSmooth);
+            float fcNoise = 2500.f + 6000.f * pressure;
+            const float fcSoft = model.noiseSoftHz[v.reg];
+            if (fcSoft > 0.f && pressure < model.dynLoud) {
+                const float fcLoud = 2500.f + 6000.f * model.dynLoud;
+                fcNoise = fcLoud * std::pow(fcSoft / fcLoud, (model.dynLoud - pressure) / (model.dynLoud - model.dynSoft));
+                fcNoise = std::max(fcNoise, 400.f);
+            }
+            const float lpA = std::exp(-2.f * (float)M_PI * fcNoise / (float)sr);
             v.t += chunkDur;
             v.secPhase += 6.2831853f * v.secRate * chunkDur;
             if (v.secPhase > 6.2831853f) v.secPhase -= 6.2831853f;
@@ -426,8 +451,15 @@ struct Engine::Impl {
                 controls(v, pl, v.t, inc1, amp1, mix1, noi1);
                 const float k = 1.f / kChunk;
                 const float dInc = (inc1 - pl.inc) * k, dAmp = (amp1 - pl.amp) * k;
-                const float dMix = (mix1 - pl.mix) * k, dNoi = (noi1 - pl.noise) * k;
-                float inc = pl.inc, amp = pl.amp, mix = pl.mix, noi = pl.noise;
+                // the two table sets around this player's bow pressure (chosen per chunk)
+                size_t seg = 0;
+                while (seg + 2 < tabQ.size() && mix1 > tabQ[seg + 1]) ++seg;
+                const float qLo = tabQ[seg], qSpan = tabQ[seg + 1] - qLo;
+                const float w0 = std::clamp((pl.mix - qLo) / qSpan, 0.f, 1.f), w1 = std::clamp((mix1 - qLo) / qSpan, 0.f, 1.f);
+                const float* ts = table(tabs[seg], v.key);
+                const float* th = table(tabs[seg + 1], v.key);
+                const float dMix = (w1 - w0) * k, dNoi = (noi1 - pl.noise) * k;
+                float inc = pl.inc, amp = pl.amp, mix = w0, noi = pl.noise;
                 double ph = pl.phase;
                 float hpX = pl.hpX, hpY = pl.hpY, lpY = pl.lpY;
                 uint32_t rs = pl.rng;
