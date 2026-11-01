@@ -62,6 +62,23 @@ def width(x, sl):
     return float(np.sqrt((s[sl] ** 2).mean() / (m[sl] ** 2).mean()))
 
 
+COH_BANDS = [butter(4, [lo / (SR / 2), hi / (SR / 2)], "band", output="sos") for lo, hi in ((150, 500), (500, 2000), (2000, 8000))]
+
+
+def coherence(x, sl):
+    """how similar left and right are (per band, max. correlation within ±1 ms, 100 ms windows)"""
+    out = []
+    for sos in COH_BANDS:
+        y = sosfilt(sos, x[:, sl], axis=1)
+        h, cs = int(0.1 * SR), []
+        for i in range(0, y.shape[1] - h, h):
+            l, r = y[0, i:i + h], y[1, i + 48:i + h - 48]
+            cc = np.correlate(l, r, mode="valid") / np.sqrt((l ** 2).sum() * (r ** 2).sum() + 1e-20)
+            cs.append(np.abs(cc).max())
+        out.append(np.mean(cs))
+    return np.array(out)
+
+
 def tail_db(x, sus, tl):
     return float(10 * np.log10((x[:, tl] ** 2).mean() / (x[:, sus] ** 2).mean()))
 
@@ -109,7 +126,7 @@ class EngineRunner:
         return read_wav(wp)
 
 
-HALL = {"release": 1.0, "rt60": 2.4, "hf": 0.45}       # learned release + hall decay
+HALL = {"release": 1.0, "rt60": 2.4, "hf": 0.45, "erdiff": 0.5, "spacing": 0.3}   # learned release, hall, room
 
 
 def model_text(curves, unrest, er, late, out=1.0):
@@ -119,7 +136,8 @@ def model_text(curves, unrest, er, late, out=1.0):
         lines.append("key %d %s" % (k, " ".join("%.2f" % v for v in curves[k])))
     lines.append("unrest " + " ".join("%.3f" % u for u in unrest))
     lines += ["er %.4f" % er, "late %.4f" % late, "out %.4f" % out,
-              "release %.3f" % HALL["release"], "hall %.3f %.3f" % (HALL["rt60"], HALL["hf"])]
+              "release %.3f" % HALL["release"], "hall %.3f %.3f" % (HALL["rt60"], HALL["hf"]),
+              "erdiff %.3f" % HALL["erdiff"], "spacing %.3f" % HALL["spacing"]]
     return "\n".join(lines) + "\n"
 
 
@@ -142,7 +160,8 @@ def main():
     note = lambda k: [(0.0, 3.0, k, 0.71)]
 
     def mono(k, seed, extra=()):
-        y = eng.render(model_text(curves, unrest, er, late), note(k), seed=seed, dry=True, extra=extra)
+        # no mic spacing here: time differences would comb-filter the mono analysis
+        y = eng.render(model_text(curves, unrest, er, late), note(k), seed=seed, dry=True, extra=("--spacing", "0") + tuple(extra))
         return y.mean(0)[int(0.5 * SR): int(3.0 * SR)]
 
     if a.resume:
@@ -150,6 +169,7 @@ def main():
             t = line.split()
             if t and t[0] == "key": curves[int(t[1])] = np.array(list(map(float, t[2:])))
             if t and t[0] == "unrest": unrest = list(map(float, t[1:]))
+            if t and t[0] in ("release",): HALL["release"] = float(t[1])
         print("  Klangfarbe + Unruhe übernommen aus", a.resume)
 
     # 1) tone colour, closed loop
@@ -192,21 +212,37 @@ def main():
     prog = [(x, y, int(k), v) for x, y, k, v in prog]
     last = max(p[1] for p in prog)
     sus, tl = slice(int(2 * SR), int((last - 0.5) * SR)), slice(int((last + 0.3) * SR), int((last + 2.5) * SR))
-    W, T = width(ref, sus), tail_db(ref, sus, tl)
-    print(f"  Ziel: Breite {W:.2f}, Nachhall nach Loslassen {T:.1f} dB")
-    def room_grid(ers, lates):
-        best = None
-        for e in ers:
-            for l in lates:
-                y = eng.render(model_text(curves, unrest, e, l), prog, seed=3, tail=4)
-                w, t = width(y, sus), tail_db(y, sus, tl)
-                c = (w - W) ** 2 * 100 + (t - T) ** 2 / 4
-                if best is None or c < best[0]:
-                    best = (c, e, l, w, t)
-        return best
+    W, T, C = width(ref, sus), tail_db(ref, sus, tl), coherence(ref, sus)
+    print(f"  Ziel: Breite {W:.2f}, L/R-Ähnlichkeit {' / '.join(f'{c:.2f}' for c in C)}, Nachhall nach Loslassen {T:.1f} dB")
+    def room_cost(e, l):
+        y = eng.render(model_text(curves, unrest, e, l), prog, seed=3, tail=4)
+        w, t, co = width(y, sus), tail_db(y, sus, tl), coherence(y, sus)
+        return (w - W) ** 2 * 50 + np.sum((co - C) ** 2) * 100 + (t - T) ** 2 / 4, w, t, co
 
-    _, er, late, w, t = room_grid(np.linspace(0.2, 2.0, 10), np.linspace(0, 1.2, 13))   # some room mic always
-    print(f"  Raum: frühe Reflexionen {er:.2f}, Hall {late:.2f} → Breite {w:.2f}, Nachhall {t:.1f} dB")
+    def room_search(er, late, passes=2):
+        """coordinate search over room mic level, hall level, how much room stays with the
+        desk (coherent) and the main-mic spacing"""
+        grids = {"er": np.linspace(0.1, 2.0, 7), "late": np.linspace(0.0, 1.0, 6),
+                 "erdiff": np.array([0.0, 0.25, 0.5, 0.75, 1.0]), "spacing": np.array([0.0, 0.25, 0.5, 0.8])}
+        cur = {"er": er, "late": late}
+        best = room_cost(er, late)
+        for _ in range(passes):
+            for name, grid in grids.items():
+                for v in grid:
+                    old_v = cur.get(name, HALL.get(name))
+                    if name in cur: cur[name] = v
+                    else: HALL[name] = v
+                    c = room_cost(cur["er"], cur["late"])
+                    if c[0] < best[0]:
+                        best = c
+                    else:
+                        if name in cur: cur[name] = old_v
+                        else: HALL[name] = old_v
+        return cur["er"], cur["late"], best
+
+    er, late, (c, w, t, co) = room_search(0.6, 0.2)
+    print(f"  Raum: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
+          f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
 
     # 3b) the release: how the sound dies after the keys are let go (3 bands, 50 ms steps)
     DEC_BANDS = [butter(4, [lo / (SR / 2), hi / (SR / 2)], "band", output="sos") for lo, hi in ((250, 1000), (1000, 4000), (4000, 10000))]
@@ -233,8 +269,9 @@ def main():
     c, rel, rt, hf = best
     HALL.update(release=rel, rt60=rt, hf=hf)
     print(f"  Ausklang: Spieler ×{rel:.1f}, Hall {rt:.1f} s, Höhen ×{hf:.2f} → Abweichung {c:.1f} dB")
-    _, er, late, w, t = room_grid(np.clip(er + np.linspace(-0.3, 0.3, 5), 0.2, 2.0), np.clip(late + np.linspace(-0.2, 0.2, 5), 0, 1.5))
-    print(f"  Raum nachgeeicht: frühe Reflexionen {er:.2f}, Hall {late:.2f} → Breite {w:.2f}, Nachhall {t:.1f} dB")
+    er, late, (c, w, t, co) = room_search(er, late, passes=1)
+    print(f"  Raum nachgeeicht: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
+          f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
 
     # 4) overall colour of the complete sound (close + room + hall) against the reference:
     #    one gentle correction shared by all keys, two rounds

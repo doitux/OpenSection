@@ -24,6 +24,8 @@ struct Model {
     float release = 1.0f;                      // learned release time (scale of 0.22 s)
     float hallRt60 = 2.4f;                     // learned hall decay (s)
     float hallHf = 0.45f;                      // high frequencies decay this much faster
+    float erDiffuse = 0.5f;                    // 0: room reflections stay at the desk's position, 1: fully spread
+    float spacing = 0.3f;                      // main-mic spacing (time differences), learned
 
     // tone colour for any key (linear interpolation between learned keys), dB at frequency f
     float colourDb(int midi, float hz) const;

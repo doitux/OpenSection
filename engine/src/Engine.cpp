@@ -111,11 +111,15 @@ struct Voice {
     std::array<Player, kMaxPlayers> pl;
 };
 
+constexpr int kErTaps = 20;
 struct Desk {
     Convolver body;
     float panL = 0.7f, panR = 0.7f;
-    std::array<int, 12> erDelL {}, erDelR {};
-    std::array<float, 12> erGainL {}, erGainR {};
+    int dDelL = 0, dDelR = 0;                         // arrival time at the left/right mic (spaced pair + row)
+    bool back = false;                                // back desk: further away, darker, more room
+    float lpA = 1.f, lpL = 0.f, lpR = 0.f, dryGain = 1.f, erScale = 1.f;
+    std::array<int, kErTaps> erDelL {}, erDelR {};
+    std::array<float, kErTaps> erGainL {}, erGainR {};
     std::vector<float> ring;                          // body output history for reflections
     int ringPos = 0, ringMask = 0;
     bool active = false;
@@ -235,17 +239,21 @@ struct Engine::Impl {
     {
         std::mt19937 rng(seed * 7919u + 11u);
         std::uniform_real_distribution<float> U(0.f, 1.f);
-        int ringLen = 1; while (ringLen < (int)(0.09 * sr)) ringLen <<= 1;
+        int ringLen = 1; while (ringLen < (int)(0.12 * sr)) ringLen <<= 1;
         for (int r = 0; r < kNumRegisters; ++r) {
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
                 d.body.setIR(makeBody(kReg[r].bodyScale * (0.95f + 0.1f * U(rng)), rng, sr));
                 d.ring.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
                 const float pan = std::clamp(kReg[r].seat + (k - 1.5f) / 1.5f * 0.75f, -1.f, 1.f);
+                d.back = (k % 2) == 1;                                   // every second desk sits further back
+                d.lpA = d.back ? 1.f - std::exp(-2.f * (float)M_PI * 6500.f / (float)sr) : 1.f;
+                d.dryGain = d.back ? 0.75f : 1.f;
+                d.erScale = d.back ? 1.6f : 1.f;
                 for (int c = 0; c < 2; ++c) {
                     const float near = 1.f + 0.5f * (c == 1 ? pan : -pan);
-                    for (int t = 0; t < 12; ++t) {
-                        const float dl = 0.004f + 0.071f * U(rng);
+                    for (int t = 0; t < kErTaps; ++t) {
+                        const float dl = 0.004f + 0.086f * U(rng) * U(rng) + 0.01f * U(rng);   // denser early, sparser late
                         const float g = near * (0.3f + 0.4f * U(rng)) * (U(rng) < 0.5f ? -1.f : 1.f) * std::exp(-dl / 0.035f);
                         (c == 0 ? d.erDelL : d.erDelR)[t] = (int)(dl * sr);
                         (c == 0 ? d.erGainL : d.erGainR)[t] = g;
@@ -262,8 +270,14 @@ struct Engine::Impl {
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
                 const float pan = std::clamp(kReg[r].seat * std::min(1.f, p.width) + (k - 1.5f) / 1.5f * 0.75f * p.width, -1.f, 1.f);
-                d.panL = std::cos((pan + 1.f) * (float)M_PI / 4.f);
-                d.panR = std::sin((pan + 1.f) * (float)M_PI / 4.f);
+                // mild level panning + time difference like a spaced microphone pair (up to ~1.1 ms),
+                // back desks arrive a little later: separate sources in a room, not phantom speakers
+                const float lvl = 0.6f * pan;
+                d.panL = std::cos((lvl + 1.f) * (float)M_PI / 4.f) * d.dryGain;
+                d.panR = std::sin((lvl + 1.f) * (float)M_PI / 4.f) * d.dryGain;
+                const float itd = 0.0011f * model.spacing * p.spacing * (float)sr, row = (d.back ? 0.007f : 0.f) * (float)sr;
+                d.dDelL = (int)(row + itd * std::max(pan, 0.f));
+                d.dDelR = (int)(row + itd * std::max(-pan, 0.f));
             }
     }
 
@@ -442,6 +456,7 @@ struct Engine::Impl {
         std::memset(dryL, 0, sizeof dryL); std::memset(dryR, 0, sizeof dryR);
         std::memset(erL, 0, sizeof erL); std::memset(erR, 0, sizeof erR);
         float body[kChunk];
+        const float erDiff = model.erDiffuse;
         for (int b = 0; b < kBuses; ++b) {
             Desk& d = desks[b];
             const float* in = busIn[b].data();
@@ -454,14 +469,19 @@ struct Engine::Impl {
                 continue;
             }
             for (int n = 0; n < kChunk; ++n) {
-                dryL[n] += d.panL * body[n]; dryR[n] += d.panR * body[n];
                 d.ring[d.ringPos] = body[n];
+                float dl = d.ring[(d.ringPos - d.dDelL) & d.ringMask], dr = d.ring[(d.ringPos - d.dDelR) & d.ringMask];
+                d.lpL += d.lpA * (dl - d.lpL); d.lpR += d.lpA * (dr - d.lpR);   // air absorption for back desks
+                dryL[n] += d.panL * d.lpL; dryR[n] += d.panR * d.lpR;
                 float l = 0, r = 0;
-                for (int t = 0; t < 12; ++t) {
+                for (int t = 0; t < kErTaps; ++t) {
                     l += d.erGainL[t] * d.ring[(d.ringPos - d.erDelL[t]) & d.ringMask];
                     r += d.erGainR[t] * d.ring[(d.ringPos - d.erDelR[t]) & d.ringMask];
                 }
-                erL[n] += l; erR[n] += r;
+                // part of the room stays with the desk (the player sits *in* the room), part is spread wide
+                const float c = (1.f - erDiff) * 1.41421356f;
+                erL[n] += d.erScale * (c * d.panL * l + erDiff * l);
+                erR[n] += d.erScale * (c * d.panR * l + erDiff * r);
                 d.ringPos = (d.ringPos + 1) & d.ringMask;
             }
         }
@@ -502,7 +522,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->hall.prepare(sampleRate, d->model.hallRt60, d->model.hallHf);
     d->releaseScale = d->model.release;
     d->erDiffL.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);
-    d->erDiffR.prepare(sampleRate, { 3.7f, 4.9f, 8.3f, 10.7f }, 0.6f);
+    d->erDiffR.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);   // same diffusion: keeps the coherent part coherent
     d->erLpA = 1.f - std::exp(-2.f * (float)M_PI * 5000.f / (float)sampleRate);
     d->fifoL.assign((size_t)maxBlock + kChunk, 0.f); d->fifoR.assign((size_t)maxBlock + kChunk, 0.f);
     reset();
@@ -510,7 +530,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
 
 void Engine::setParams(const Params& p)
 {
-    const bool widthChanged = p.width != d->p.width;
+    const bool widthChanged = p.width != d->p.width || p.spacing != d->p.spacing;
     d->p = p;
     if (widthChanged) d->updatePans();
 }

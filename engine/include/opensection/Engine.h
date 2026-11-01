@@ -13,15 +13,16 @@ struct Params {
     // ensemble
     float quality = 0.7f;      // 0.3 (eco) .. 1.0 (studio): players per note
     float width = 1.0f;        // 0 .. 1.5   stereo spread of the desks
+    float spacing = 1.0f;      // 0 .. 2     distance of the two main mics (time differences)
     // bowing
     float attack = 1.0f;       // 0.3 .. 3   scale of the bow attack time
     float release = 1.0f;      // 0.3 .. 4   scale of the release
     float vibrato = 1.0f;      // 0 .. 2     vibrato depth
     float unrest = 1.0f;       // 0 .. 2     scale of the learned bow-pressure unrest
-    float rosin = 1.0f;        // 0 .. 3     bow noise / scratch
+    float rosin = 2.0f;        // 0 .. 3     bow noise / scratch
     float velocity = 1.0f;     // 0 .. 1     key velocity -> loudness + faster/harder attack
-    float coupling = 0.15f;    // 0 .. 1     how much of the vibrato the section shares
-    float detune = 1.0f;       // 0 .. 3     spread of the players' tuning
+    float coupling = 0.1f;     // 0 .. 1     how much of the vibrato the section shares
+    float detune = 2.5f;       // 0 .. 3     spread of the players' tuning (x 6 cents)
     float expression = 1.0f;   // 0 .. 1     bow pressure (CC11 by default)
     // microphones / room
     float closeMic = 1.0f;     // 0 .. 2     dry (close) signal

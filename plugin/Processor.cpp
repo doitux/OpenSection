@@ -14,6 +14,8 @@ static const char* vibrato = "vibrato";
 static const char* unrest = "unrest";
 static const char* rosin = "rosin";
 static const char* velocity = "velocity";
+static const char* detune = "detune";
+static const char* spacing = "spacing";
 static const char* closeMic = "close";
 static const char* roomMic = "room";
 static const char* hall = "hall";
@@ -40,12 +42,14 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     add(ids::release, "Release", 0.3f, 4.f, 1.f, 1.f);
     add(ids::vibrato, "Vibrato", 0.f, 2.f, 1.f);
     add(ids::unrest, "Unrest", 0.f, 2.f, 1.f);
-    add(ids::rosin, "Rosin", 0.f, 3.f, 1.f, 1.f);
+    add(ids::rosin, "Rosin", 0.f, 4.f, 2.f, 2.f);
+    add(ids::detune, "Intonation spread", 0.f, 4.f, 2.5f, 2.5f);
+    add(ids::spacing, "Mic spacing", 0.f, 2.f, 1.f);
     add(ids::velocity, "Velocity", 0.f, 1.f, 1.f);
     add(ids::closeMic, "Close mics", 0.f, 2.f, 1.f);
     add(ids::roomMic, "Room mics", 0.f, 2.f, 1.f);
     add(ids::hall, "Hall", 0.f, 3.f, 1.f, 1.f);
-    add(ids::gain, "Volume", -24.f, 12.f, 0.f, -1, [](float v, int) { return String(v, 1) + " dB"; });
+    add(ids::gain, "Volume", -24.f, 12.f, -6.f, -1, [](float v, int) { return String(v, 1) + " dB"; });
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::exprSource, 1 }, "Expression source",
                                                        StringArray { "CC11 Expression", "CC1 Mod wheel", "CC2 Breath", "Off (use knob)" }, 0));
     add(ids::expression, "Bow pressure", 0.f, 1.f, 1.f);
@@ -85,6 +89,8 @@ opensection::Params OpenSectionProcessor::readParams() const
     p.unrest = v(ids::unrest);
     p.rosin = v(ids::rosin);
     p.velocity = v(ids::velocity);
+    p.detune = v(ids::detune);
+    p.spacing = v(ids::spacing);
     p.closeMic = v(ids::closeMic);
     p.roomMic = v(ids::roomMic);
     p.hall = v(ids::hall);

@@ -20,10 +20,13 @@ recordings.
    sound emerges from many small differences – no chorus effect.
 3. **Every desk has its own instrument.** Bodies with ~100 narrow resonances each. Vibrato sweeps the
    harmonics across these resonances – the "shimmer" of real strings.
-4. **Learned fingerprint.** A learning tool plays the engine against a sampled section (key by key,
+4. **Learned room.** Part of the room stays with each desk (the players sit *in* the hall), part is
+   spread wide; back desks are further away (later, darker, more room). Room level, how much stays at
+   the desk, mic spacing, hall decay and the release are calibrated against the reference.
+5. **Learned fingerprint.** A learning tool plays the engine against a sampled section (key by key,
    closed loop) and stores only the tone-colour curve per key, the unrest per register, and the
    room calibration (stereo width and reverb energy) – about 16 KB.
-5. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
+6. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
    and an FDN hall.
 
 ### Real-time design

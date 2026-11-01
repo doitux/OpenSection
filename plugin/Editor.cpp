@@ -63,8 +63,8 @@ OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEd
     setLookAndFeel(&look);
     groups.push_back({ "PLAYING", { &knob("velocity", "Velocity"), &knob("width", "Width") } });
     groups.push_back({ "BOWING", { &knob("attack", "Attack"), &knob("release", "Release"), &knob("vibrato", "Vibrato"),
-                                   &knob("unrest", "Unrest"), &knob("rosin", "Rosin") } });
-    groups.push_back({ "MICROPHONES", { &knob("close", "Close"), &knob("room", "Room"), &knob("hall", "Hall") } });
+                                   &knob("unrest", "Unrest"), &knob("rosin", "Rosin"), &knob("detune", "Intonation") } });
+    groups.push_back({ "MICROPHONES", { &knob("close", "Close"), &knob("spacing", "Spacing"), &knob("room", "Room"), &knob("hall", "Hall") } });
     groups.push_back({ "OUTPUT", { &knob("expression", "Bow pressure"), &knob("gain", "Volume") } });
 
     auto setupCombo = [&](ComboBox& c, Label& l, const char* id, const char* text,
@@ -79,9 +79,9 @@ OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEd
     setupCombo(exprSource, exprLabel, "exprSource", "Expression pedal", exprAtt);
 
     setResizable(true, true);
-    setResizeLimits(820, 380, 1640, 760);
-    getConstrainer()->setFixedAspectRatio(820.0 / 380.0);
-    setSize(820, 380);
+    setResizeLimits(940, 380, 1880, 760);
+    getConstrainer()->setFixedAspectRatio(940.0 / 380.0);
+    setSize(940, 380);
     startTimerHz(15);
 }
 
@@ -97,7 +97,7 @@ void OpenSectionEditor::timerCallback()
 
 void OpenSectionEditor::paint(Graphics& g)
 {
-    const float s = getWidth() / 820.f;
+    const float s = getWidth() / 940.f;
     g.fillAll(col::bg);
     g.setColour(col::text);
     g.setFont(FontOptions(26.f * s, Font::bold));
@@ -105,13 +105,13 @@ void OpenSectionEditor::paint(Graphics& g)
     g.setColour(col::dim);
     g.setFont(FontOptions(12.f * s));
     g.drawText("computed string section", Rectangle<float>(22 * s, 36 * s, 300 * s, 14 * s), Justification::left);
-    g.drawText(status, Rectangle<float>(420 * s, 16 * s, 380 * s, 16 * s), Justification::right);
+    g.drawText(status, Rectangle<float>(540 * s, 16 * s, 380 * s, 16 * s), Justification::right);
     // expression meter
-    const auto m = Rectangle<float>(680 * s, 38 * s, 120 * s, 5 * s);
+    const auto m = Rectangle<float>(800 * s, 38 * s, 120 * s, 5 * s);
     g.setColour(col::line); g.fillRoundedRectangle(m, 2.5f * s);
     g.setColour(col::accent2); g.fillRoundedRectangle(m.withWidth(m.getWidth() * exprShown), 2.5f * s);
     g.setFont(FontOptions(11.f * s));
-    g.drawText("pedal", Rectangle<float>(620 * s, 33 * s, 55 * s, 14 * s), Justification::right);
+    g.drawText("pedal", Rectangle<float>(740 * s, 33 * s, 55 * s, 14 * s), Justification::right);
 
     for (auto& gr : groups) {
         auto a = gr.area.toFloat();
@@ -124,7 +124,7 @@ void OpenSectionEditor::paint(Graphics& g)
 
 void OpenSectionEditor::resized()
 {
-    const float s = getWidth() / 820.f;
+    const float s = getWidth() / 940.f;
     auto r = getLocalBounds().reduced(roundToInt(16 * s));
     r.removeFromTop(roundToInt(48 * s));
     auto bottom = r.removeFromBottom(roundToInt(40 * s));
