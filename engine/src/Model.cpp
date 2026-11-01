@@ -1,0 +1,88 @@
+// OpenSection – SPDX-License-Identifier: GPL-3.0-or-later
+#include "opensection/Model.h"
+#include <algorithm>
+#include <cmath>
+#include <sstream>
+
+namespace opensection {
+
+static float interpLog(const std::vector<float>& xs, const std::vector<float>& ys, float x)
+{
+    if (x <= xs.front()) return ys.front();
+    if (x >= xs.back()) return ys.back();
+    auto it = std::upper_bound(xs.begin(), xs.end(), x);
+    size_t i = (size_t)(it - xs.begin());
+    float x0 = std::log2(xs[i - 1]), x1 = std::log2(xs[i]);
+    float w = (std::log2(x) - x0) / (x1 - x0);
+    return ys[i - 1] + w * (ys[i] - ys[i - 1]);
+}
+
+float Model::colourDb(int midi, float hz) const
+{
+    if (keys.empty()) return 0.f;
+    if (midi <= keys.front()) return interpLog(bandHz, curves.front(), hz);
+    if (midi >= keys.back()) return interpLog(bandHz, curves.back(), hz);
+    auto it = std::upper_bound(keys.begin(), keys.end(), midi);
+    size_t i = (size_t)(it - keys.begin());
+    float w = float(midi - keys[i - 1]) / float(keys[i] - keys[i - 1]);
+    return (1 - w) * interpLog(bandHz, curves[i - 1], hz) + w * interpLog(bandHz, curves[i], hz);
+}
+
+Model Model::flat()
+{
+    Model m;
+    for (int i = 0; i < 55; ++i) {
+        float f = 40.f * std::pow(2.f, i / 6.f);
+        if (f >= 20000.f) break;
+        m.bandHz.push_back(f);
+    }
+    m.keys = { 60 };
+    m.curves = { std::vector<float>(m.bandHz.size(), 0.f) };
+    return m;
+}
+
+Model Model::fromText(const std::string& text, std::string* error)
+{
+    Model m;
+    std::istringstream in(text);
+    std::string tok;
+    auto fail = [&](const char* what) { if (error) *error = what; return Model::flat(); };
+    if (!(in >> tok) || tok != "OSM1") return fail("not an OpenSection model");
+    while (in >> tok) {
+        if (tok == "#") { std::getline(in, tok); continue; }
+        if (tok == "bands") {
+            int n; in >> n; m.bandHz.resize(n);
+            for (auto& f : m.bandHz) in >> f;
+        } else if (tok == "key") {
+            int k; in >> k; m.keys.push_back(k);
+            m.curves.emplace_back(m.bandHz.size());
+            for (auto& v : m.curves.back()) in >> v;
+        } else if (tok == "unrest") {
+            for (auto& u : m.unrest) in >> u;
+        } else if (tok == "er") { in >> m.erGain;
+        } else if (tok == "late") { in >> m.lateGain;
+        } else if (tok == "out") { in >> m.outGain;
+        } else return fail("unknown token in model");
+    }
+    if (m.bandHz.empty() || m.keys.empty()) return fail("model incomplete");
+    return m;
+}
+
+std::string Model::toText() const
+{
+    std::ostringstream o;
+    o << "OSM1\n# OpenSection model: learned tone colour per key (dB on 1/6-octave grid)\n";
+    o << "bands " << bandHz.size();
+    for (float f : bandHz) o << ' ' << f;
+    o << '\n';
+    for (size_t i = 0; i < keys.size(); ++i) {
+        o << "key " << keys[i];
+        for (float v : curves[i]) o << ' ' << std::round(v * 100.f) / 100.f;
+        o << '\n';
+    }
+    o << "unrest"; for (float u : unrest) o << ' ' << u; o << '\n';
+    o << "er " << erGain << "\nlate " << lateGain << "\nout " << outGain << '\n';
+    return o.str();
+}
+
+} // namespace opensection

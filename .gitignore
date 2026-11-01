@@ -1,0 +1,5 @@
+build*/
+*.wav
+*.npz
+__pycache__/
+.vscode/

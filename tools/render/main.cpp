@@ -1,0 +1,136 @@
+// OpenSection – SPDX-License-Identifier: GPL-3.0-or-later
+// Command-line renderer and live-performance benchmark for the engine.
+//
+//   opensection-render [options] <notes.txt> <out.wav>
+//   opensection-render --bench [options] <notes.txt>
+//
+// notes.txt lines:  <on_s> <off_s> <midi> <velocity 0..1>
+//                   cc <time_s> <64|11> <value 0..1>        (sustain / expression)
+// options: --model file.osm  --sr 48000  --block 128  --seed N  --dry  --quality q
+//          --unrest r0,r1,r2,r3  --room er,late  --tail seconds
+#include "opensection/Engine.h"
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace opensection;
+
+struct Ev { double t; Event e; };
+
+static bool readNotes(const char* path, std::vector<Ev>& out, double& end)
+{
+    std::ifstream f(path);
+    if (!f) return false;
+    std::string line;
+    end = 0;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream in(line);
+        if (line.rfind("cc", 0) == 0) {
+            std::string cc; double t; int num; float v;
+            in >> cc >> t >> num >> v;
+            Event e{}; e.type = num == 64 ? Event::Sustain : Event::Expression; e.value = v;
+            out.push_back({ t, e }); end = std::max(end, t);
+            continue;
+        }
+        double on, off; int key; float vel;
+        if (!(in >> on >> off >> key >> vel)) continue;
+        Event a{}; a.type = Event::NoteOn; a.key = key; a.value = vel;
+        Event b{}; b.type = Event::NoteOff; b.key = key;
+        out.push_back({ on, a }); out.push_back({ off, b });
+        end = std::max(end, off);
+    }
+    std::stable_sort(out.begin(), out.end(), [](const Ev& x, const Ev& y) {
+        if (x.t != y.t) return x.t < y.t;
+        return x.e.type == Event::NoteOff && y.e.type != Event::NoteOff;   // offs first
+    });
+    return true;
+}
+
+static void writeWav(const char* path, const std::vector<float>& L, const std::vector<float>& R, int sr)
+{
+    FILE* f = std::fopen(path, "wb");
+    uint32_t n = (uint32_t)L.size(), data = n * 8, riff = 36 + data, fmt = 16, sr32 = sr, br = sr * 8;
+    uint16_t pcm = 3, ch = 2, ba = 8, bps = 32;
+    std::fwrite("RIFF", 1, 4, f); std::fwrite(&riff, 4, 1, f); std::fwrite("WAVEfmt ", 1, 8, f);
+    std::fwrite(&fmt, 4, 1, f); std::fwrite(&pcm, 2, 1, f); std::fwrite(&ch, 2, 1, f); std::fwrite(&sr32, 4, 1, f);
+    std::fwrite(&br, 4, 1, f); std::fwrite(&ba, 2, 1, f); std::fwrite(&bps, 2, 1, f);
+    std::fwrite("data", 1, 4, f); std::fwrite(&data, 4, 1, f);
+    for (uint32_t i = 0; i < n; ++i) { std::fwrite(&L[i], 4, 1, f); std::fwrite(&R[i], 4, 1, f); }
+    std::fclose(f);
+}
+
+int main(int argc, char** argv)
+{
+    std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
+    bool dry = false, bench = false; float quality = 1.0f, tail = 4.0f;
+    float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1;
+    std::vector<const char*> pos;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&]() { return i + 1 < argc ? argv[++i] : ""; };
+        if (a == "--model") modelPath = next();
+        else if (a == "--sr") sr = std::atoi(next());
+        else if (a == "--block") block = std::atoi(next());
+        else if (a == "--seed") seed = (uint32_t)std::atoi(next());
+        else if (a == "--dry") dry = true;
+        else if (a == "--bench") bench = true;
+        else if (a == "--quality") quality = (float)std::atof(next());
+        else if (a == "--tail") tail = (float)std::atof(next());
+        else if (a == "--unrest") std::sscanf(next(), "%f,%f,%f,%f", &unrest[0], &unrest[1], &unrest[2], &unrest[3]);
+        else if (a == "--room") std::sscanf(next(), "%f,%f", &er, &late);
+        else pos.push_back(argv[i]);
+    }
+    if (pos.size() < (bench ? 1u : 2u)) { std::fprintf(stderr, "usage: see source header\n"); return 2; }
+
+    Model model = Model::builtin();
+    if (!modelPath.empty()) {
+        std::ifstream f(modelPath); std::stringstream ss; ss << f.rdbuf();
+        std::string err; model = Model::fromText(ss.str(), &err);
+        if (!err.empty()) { std::fprintf(stderr, "model: %s\n", err.c_str()); return 1; }
+    }
+    std::vector<Ev> evs; double end;
+    if (!readNotes(pos[0], evs, end)) { std::fprintf(stderr, "cannot read %s\n", pos[0]); return 1; }
+
+    Engine eng(model, seed);
+    eng.prepare(sr, block);
+    Params p; p.quality = quality; p.dryOnly = dry;
+    eng.setParams(p);
+    for (int r = 0; r < 4; ++r) if (unrest[r] >= 0) eng.setUnrestOverride(r, unrest[r]);
+    if (er >= 0) eng.setRoomOverride(er, late);
+
+    const long total = (long)((end + tail) * sr);
+    std::vector<float> L, R; if (!bench) { L.reserve(total); R.reserve(total); }
+    std::vector<float> bl(block), br(block);
+    std::vector<Event> blockEv;
+    size_t ei = 0;
+    double sum = 0, worst = 0; long blocks = 0; std::vector<double> times; int peakPlayers = 0, peakNotes = 0;
+    for (long t0 = 0; t0 < total; t0 += block) {
+        const int n = (int)std::min<long>(block, total - t0);
+        blockEv.clear();
+        while (ei < evs.size() && (long)(evs[ei].t * sr) < t0 + n) {
+            Event e = evs[ei].e; e.offset = (int)std::max<long>(0, (long)(evs[ei].t * sr) - t0);
+            blockEv.push_back(e); ++ei;
+        }
+        auto a = std::chrono::steady_clock::now();
+        eng.process(bl.data(), br.data(), n, blockEv.data(), (int)blockEv.size());
+        auto b = std::chrono::steady_clock::now();
+        double us = std::chrono::duration<double, std::micro>(b - a).count();
+        sum += us; worst = std::max(worst, us); ++blocks; times.push_back(us);
+        peakPlayers = std::max(peakPlayers, eng.activePlayers()); peakNotes = std::max(peakNotes, eng.activeNotes());
+        if (!bench) { L.insert(L.end(), bl.begin(), bl.begin() + n); R.insert(R.end(), br.begin(), br.begin() + n); }
+    }
+    const double blockUs = 1e6 * block / sr;
+    std::sort(times.begin(), times.end());
+    auto pct = [&](double q) { return times[std::min(times.size() - 1, (size_t)(q * times.size()))]; };
+    std::printf("Perzentile: 50 %% %.0f µs, 99 %% %.0f µs, 99,9 %% %.0f µs (Zeitfenster %.0f µs)\n", pct(0.5), pct(0.99), pct(0.999), blockUs);
+    std::printf("Blöcke %ld à %d, Ø %.1f µs (%.1f %% eines Kerns), schlechtester Block %.1f µs (%.0f %% des Zeitfensters), max %d Töne / %d Spieler\n",
+                blocks, block, sum / blocks, 100.0 * sum / blocks / blockUs, worst, 100.0 * worst / blockUs, peakNotes, peakPlayers);
+    if (!bench) writeWav(pos[1], L, R, sr);
+    return 0;
+}

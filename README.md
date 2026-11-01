@@ -1,0 +1,78 @@
+# OpenSection
+
+**A computed string section – no gigabytes of samples.**
+Free and open source (GPLv3), for Linux, Windows and macOS.
+
+OpenSection builds an orchestral string section the way a physical-modelling piano builds a piano:
+every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
+recordings.
+
+> Status: **early development** – the real-time engine and the learning tool work;
+> the plugin (VST3 / CLAP / LV2 / AU / standalone) and the user interface are next.
+
+## How it works
+
+1. **Every player is computed.** A bowed string moves in a sawtooth-like "Helmholtz motion": the bow
+   grabs the string, it slips, flies back, is grabbed again – hundreds of times per second. Each virtual
+   player has their own slight detune, drift, vibrato (a random walk, not an LFO), entry time, bow
+   changes, bow-pressure unrest and rosin noise at every slip.
+2. **A section is a swarm.** 6 basses, 8 celli, 10 violas, 14 violins per note (scalable). The ensemble
+   sound emerges from many small differences – no chorus effect.
+3. **Every desk has its own instrument.** Bodies with ~100 narrow resonances each. Vibrato sweeps the
+   harmonics across these resonances – the "shimmer" of real strings.
+4. **Learned fingerprint.** A learning tool plays the engine against a sampled section (key by key,
+   closed loop) and stores only the tone-colour curve per key, the unrest per register, and the
+   room calibration (stereo width and reverb energy) – about 16 KB.
+5. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
+   and an FDN hall.
+
+### Real-time design
+
+| part | cost |
+|---|---|
+| player (wavetable that already contains the learned colour, rosin noise, envelopes) | ~25 operations / sample |
+| 16 desk bodies (partitioned FFT convolution, idle desks are skipped) | fixed |
+| room reflections, hall | fixed |
+
+Measured (48 kHz, 128-sample buffer, one core of a 2.8 GHz Xeon):
+
+| scenario | quality | average load | 99 % of blocks below |
+|---|---|---|---|
+| piano-style arpeggios with sustain pedal, up to 20 notes / 146 players | normal (0.7) | 12 % | 0.73 ms of 2.67 ms |
+| same | eco (0.4) | 10 % | 0.58 ms |
+| same | studio (1.0) | 14 % | 1.0 ms |
+
+No added latency. Tone colour of the learned model deviates from the reference by 0.7 dB on
+average (1/6-octave smoothed, 80 Hz–12 kHz); stereo width and reverb energy are calibrated to it.
+
+## Building
+
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/opensection-render notes.txt out.wav        # offline render
+./build/opensection-render --bench notes.txt        # live-performance benchmark
+```
+
+`notes.txt`: one line per note `start_s end_s midi velocity(0..1)`, plus optional
+`cc time_s 64|11 value(0..1)` lines for sustain pedal / expression.
+
+## Re-learning the model
+
+```bash
+python3 tools/learn/learn.py --vpo <Virtual-Playing-Orchestra> --sfizz-render <sfizz_render> \
+    --engine build/opensection-render --reference <progression.wav> --notes <progression.txt> \
+    --out models/opensection.osm
+python3 tools/learn/embed.py
+```
+
+## Credits
+
+The shipped model was learned from **Virtual Playing Orchestra** by Paul Battersby
+(<http://virtualplaying.com>), which combines Sonatina Symphonic Orchestra, No Budget Orchestra,
+Mattias Westlund's and VSCO2-CE string samples. OpenSection contains no audio from these libraries –
+only derived statistics (spectral envelopes per key, modulation depth, room width and decay).
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
