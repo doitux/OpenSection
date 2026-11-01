@@ -13,6 +13,7 @@ static const char* release = "release";
 static const char* vibrato = "vibrato";
 static const char* unrest = "unrest";
 static const char* rosin = "rosin";
+static const char* velocity = "velocity";
 static const char* closeMic = "close";
 static const char* roomMic = "room";
 static const char* hall = "hall";
@@ -40,6 +41,7 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     add(ids::vibrato, "Vibrato", 0.f, 2.f, 1.f);
     add(ids::unrest, "Unrest", 0.f, 2.f, 1.f);
     add(ids::rosin, "Rosin", 0.f, 3.f, 1.f, 1.f);
+    add(ids::velocity, "Velocity", 0.f, 1.f, 1.f);
     add(ids::closeMic, "Close mics", 0.f, 2.f, 1.f);
     add(ids::roomMic, "Room mics", 0.f, 2.f, 1.f);
     add(ids::hall, "Hall", 0.f, 3.f, 1.f, 1.f);
@@ -82,6 +84,7 @@ opensection::Params OpenSectionProcessor::readParams() const
     p.vibrato = v(ids::vibrato);
     p.unrest = v(ids::unrest);
     p.rosin = v(ids::rosin);
+    p.velocity = v(ids::velocity);
     p.closeMic = v(ids::closeMic);
     p.roomMic = v(ids::roomMic);
     p.hall = v(ids::hall);

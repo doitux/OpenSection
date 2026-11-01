@@ -347,7 +347,9 @@ struct Engine::Impl {
 
         // envelope: own entry, soft bow attack, bow changes, unrest, release
         const float ts = (float)t - pl.start;
-        const float att = pl.att * p.attack;
+        // hard keys: the bow bites faster (like sampled sections: attack shrinks with velocity)
+        const float velAtt = 1.f + p.velocity * (0.71f - 1.0f * v.vel);           // 0.71 -> 1.0, 1.0 -> 0.7, 0.2 -> 1.5
+        const float att = pl.att * p.attack * std::max(0.25f, velAtt);
         float x = std::clamp(ts / att, 0.f, 1.f);
         float env = x * x * (3.f - 2.f * x);
         if ((float)t >= pl.nextChange && !v.released) {
@@ -359,7 +361,9 @@ struct Engine::Impl {
         env *= std::pow(10.f, (1.0f * pl.slowLvl.next(wSlow, pl.rng)
                                + p.unrest * unrestDb[v.reg] * pl.unrest.next(wUnrest, pl.rng)) / 20.f);
         // velocity: mostly tone, a little level (normalised to the learning velocity 0.71)
-        const float velAmp = (0.65f + 0.35f * v.vel * v.vel) / (0.65f + 0.35f * 0.5041f);
+        // velocity -> level like a sampled section (sfz amp_veltrack 100: gain = vel^2),
+        // normalised to the learning velocity 0.71; p.velocity blends towards no dynamics
+        const float velAmp = std::pow(std::max(v.vel, 0.02f) / 0.85f, 2.f * p.velocity);   // headroom for hard chords
         const float ex = exprSmooth;
         const float exAmp = ex * std::sqrt(ex);                  // pedal fully up = silent (fade pads in/out)
         amp = env * velAmp * exAmp * v.rel * v.steal / std::sqrt((float)v.nPlayers);
