@@ -361,7 +361,7 @@ struct Engine::Impl {
         // velocity: mostly tone, a little level (normalised to the learning velocity 0.71)
         const float velAmp = (0.65f + 0.35f * v.vel * v.vel) / (0.65f + 0.35f * 0.5041f);
         const float ex = exprSmooth;
-        const float exAmp = 0.06f + 0.94f * ex * std::sqrt(ex);
+        const float exAmp = ex * std::sqrt(ex);                  // pedal fully up = silent (fade pads in/out)
         amp = env * velAmp * exAmp * v.rel * v.steal / std::sqrt((float)v.nPlayers);
 
         const float pressure = std::clamp(v.vel * (0.45f + 0.55f * ex), 0.f, 1.f);
