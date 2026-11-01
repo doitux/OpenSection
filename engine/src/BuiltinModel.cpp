@@ -4,14 +4,15 @@
 
 namespace opensection {
 
-static const char* kBuiltin =
+static const char* const kBuiltin[] = {      // several pieces: MSVC limits one literal to 16 KB
 #include "BuiltinModel.inc"
-    ;
+};
 
 Model Model::builtin()
 {
-    std::string err;
-    Model m = Model::fromText(kBuiltin, &err);
+    std::string text, err;
+    for (const char* piece : kBuiltin) text += piece;
+    Model m = Model::fromText(text, &err);
     return err.empty() ? m : Model::flat();
 }
 
