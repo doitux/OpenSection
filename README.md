@@ -42,6 +42,9 @@ Measured (48 kHz, 128-sample buffer, one core of a shared 2.8 GHz Xeon – numbe
 | same | eco (0.4) | 10 % | 0.58 ms |
 | same | studio (1.0) | 14 % | 1.0 ms |
 
+On the GitHub build machines (same sustain test, quality *studio*, 204 players): Linux 4.8 %,
+Windows 6.2 %, macOS 5.9 % of one core; 99 % of blocks finish in 0.2–0.6 ms.
+
 No added latency. Tone colour of the learned model deviates from the reference by 0.7 dB on
 average (1/6-octave smoothed, 80 Hz–12 kHz); stereo width and reverb energy are calibrated to it.
 
