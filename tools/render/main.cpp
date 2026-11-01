@@ -69,6 +69,7 @@ int main(int argc, char** argv)
 {
     std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
     bool dry = false, bench = false; float quality = 1.0f, tail = 4.0f;
+    float coupling = -1, detune = -1, rosin = -1;
     float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
     for (int i = 1; i < argc; ++i) {
@@ -84,6 +85,9 @@ int main(int argc, char** argv)
         else if (a == "--tail") tail = (float)std::atof(next());
         else if (a == "--unrest") std::sscanf(next(), "%f,%f,%f,%f", &unrest[0], &unrest[1], &unrest[2], &unrest[3]);
         else if (a == "--room") std::sscanf(next(), "%f,%f", &er, &late);
+        else if (a == "--coupling") coupling = (float)std::atof(next());
+        else if (a == "--detune") detune = (float)std::atof(next());
+        else if (a == "--rosin") rosin = (float)std::atof(next());
         else if (a == "--release") std::sscanf(next(), "%f,%f,%f", &rel, &rt60, &hf);
         else pos.push_back(argv[i]);
     }
@@ -101,6 +105,9 @@ int main(int argc, char** argv)
     Engine eng(model, seed);
     eng.prepare(sr, block);
     Params p; p.quality = quality; p.dryOnly = dry;
+    if (coupling >= 0) p.coupling = coupling;
+    if (detune >= 0) p.detune = detune;
+    if (rosin >= 0) p.rosin = rosin;
     eng.setParams(p);
     for (int r = 0; r < 4; ++r) if (unrest[r] >= 0) eng.setUnrestOverride(r, unrest[r]);
     if (er >= 0) eng.setRoomOverride(er, late);

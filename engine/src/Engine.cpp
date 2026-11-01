@@ -350,10 +350,10 @@ struct Engine::Impl {
         pl.vibPhase += 6.2831853f * rate * dt;
         if (pl.vibPhase > 6.2831853f) pl.vibPhase -= 6.2831853f;
         const float ramp = std::clamp(((float)t - pl.vibOn) / 0.9f, 0.f, 1.f);
-        constexpr float kShared = 0.4f;                      // how much the players follow each other
+        const float kShared = p.coupling;                    // how much the players follow each other
         const float vib = (1.f - kShared) * std::sin(pl.vibPhase) + kShared * std::sin(v.secPhase);
         const float tIn = std::max(0.f, (float)t - pl.start);
-        const float cents = pl.det + drift + pl.scoop * std::exp(-tIn / 0.12f) + p.vibrato * pl.vibDepth * ramp * vib;
+        const float cents = p.detune * (pl.det + drift) + pl.scoop * std::exp(-tIn / 0.12f) + p.vibrato * pl.vibDepth * ramp * vib;
         const float f0 = 440.f * std::pow(2.f, (v.key - 69) / 12.f + cents / 1200.f) * bend;
         inc = f0 / (float)sr;
 
