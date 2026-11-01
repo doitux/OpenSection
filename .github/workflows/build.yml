@@ -1,0 +1,58 @@
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: linux-x86_64, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_LV2 OpenSection_Standalone opensection-render" }
+          - { os: windows-2022, name: windows-x64, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_Standalone opensection-render" }
+          - { os: macos-14, name: macos-universal, targets: "OpenSection_VST3 OpenSection_CLAP OpenSection_AU OpenSection_Standalone opensection-render" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxcomposite-dev libxext-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev
+      - name: Configure
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then EXTRA='-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0'; fi
+          if [ "$RUNNER_OS" = "Linux" ]; then GEN='-G Ninja'; fi
+          cmake -S . -B build $GEN -DCMAKE_BUILD_TYPE=Release $EXTRA
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release --parallel 4 --target ${{ matrix.targets }}
+      - name: Smoke test (render a chord progression)
+        shell: bash
+        run: |
+          R=$(find build -type f \( -name opensection-render -o -name opensection-render.exe \) | head -n1)
+          "$R" tools/testdata/progression.txt progression.wav
+          "$R" --bench tools/testdata/sustain-stress.txt
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/OpenSection
+          A=build/OpenSection_artefacts/Release
+          cp -R $A/VST3/OpenSection.vst3 $A/CLAP/OpenSection.clap dist/OpenSection/
+          [ -d $A/LV2 ] && cp -R $A/LV2/OpenSection.lv2 dist/OpenSection/ || true
+          [ -d $A/AU ] && cp -R $A/AU/OpenSection.component dist/OpenSection/ || true
+          cp -R $A/Standalone/* dist/OpenSection/
+          [ "$RUNNER_OS" = "Linux" ] && cp packaging/linux/install.sh dist/OpenSection/ || true
+          cp LICENSE README.md dist/OpenSection/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenSection-${{ matrix.name }}
+          path: dist

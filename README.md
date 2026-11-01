@@ -7,8 +7,8 @@ OpenSection builds an orchestral string section the way a physical-modelling pia
 every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
 recordings.
 
-> Status: **early development** – the real-time engine and the learning tool work;
-> the plugin (VST3 / CLAP / LV2 / AU / standalone) and the user interface are next.
+> Status: **early development** – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
+> standalone; AU on macOS) work. The full user interface (stage view, EQ, hall types, presets) is next.
 
 ## How it works
 
@@ -34,11 +34,11 @@ recordings.
 | 16 desk bodies (partitioned FFT convolution, idle desks are skipped) | fixed |
 | room reflections, hall | fixed |
 
-Measured (48 kHz, 128-sample buffer, one core of a 2.8 GHz Xeon):
+Measured (48 kHz, 128-sample buffer, one core of a shared 2.8 GHz Xeon – numbers vary by a few percent between runs):
 
 | scenario | quality | average load | 99 % of blocks below |
 |---|---|---|---|
-| piano-style arpeggios with sustain pedal, up to 20 notes / 146 players | normal (0.7) | 12 % | 0.73 ms of 2.67 ms |
+| piano-style arpeggios with sustain pedal, up to 20 notes / 146 players | normal (0.7) | 12–15 % | 0.9 ms of 2.67 ms |
 | same | eco (0.4) | 10 % | 0.58 ms |
 | same | studio (1.0) | 14 % | 1.0 ms |
 
@@ -76,3 +76,11 @@ only derived statistics (spectral envelopes per key, modulation depth, room widt
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+## Installing (Linux)
+
+Download the build from the GitHub Actions artifacts (or build yourself), unpack and run
+`bash OpenSection/install.sh`. It installs VST3, CLAP and LV2 into your home folder
+(`~/.vst3`, `~/.clap`, `~/.lv2`) plus the standalone app. `bash install.sh --remove` uninstalls.
+
+Windows and macOS builds are produced by CI (VST3, CLAP, standalone; AU on macOS) – testers welcome.

@@ -312,8 +312,8 @@ struct Engine::Impl {
             pl.start = 0.06f * urand(pl.rng);
             pl.att = 0.35f + 0.45f * urand(pl.rng);
             pl.nextChange = pl.start + 1.5f + 3.f * urand(pl.rng);
-            pl.drift.warm(wDrift, pl.rng, 400); pl.rateJit.warm(wRate, pl.rng, 200);
-            pl.slowLvl.warm(wSlow, pl.rng, 200); pl.unrest.warm(wUnrest, pl.rng, 50);
+            pl.drift.warm(wDrift, pl.rng, 40); pl.rateJit.warm(wRate, pl.rng, 20);   // short warm-up: cheap note-on
+            pl.slowLvl.warm(wSlow, pl.rng, 20); pl.unrest.warm(wUnrest, pl.rng, 10);
             controls(v, pl, 0.0, pl.inc, pl.amp, pl.mix, pl.noise);
         }
     }
