@@ -271,7 +271,9 @@ struct Engine::Impl {
                     const int node = lv[lvl].node;
                     amp[h] = node == -2 ? aS : node == -3 ? aH : node == -1 ? c
                            : c * std::pow(10.f, std::clamp(model.dynDb((size_t)node, key, f), -40.f, 8.f) / 20.f);
-                    if (nVar > 1 && h > 1) amp[h] *= std::pow(10.f, model.harmVar * N01(vr) / 20.f);
+                    // (mean power stays the same: the log-normal spread would otherwise add ~sigma^2/4.3 dB)
+                    if (nVar > 1 && h > 1)
+                        amp[h] *= std::pow(10.f, (model.harmVar * N01(vr) - model.harmVar * model.harmVar * 0.11513f) / 20.f);
                 }
                 std::fill(re.begin(), re.end(), 0.f); std::fill(im.begin(), im.end(), 0.f);
                 for (int h = 1; h <= nh; ++h) { im[h] = -amp[h] / 2.f; im[kTableLen - h] = amp[h] / 2.f; }

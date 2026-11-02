@@ -126,6 +126,7 @@ class EngineRunner:
         return read_wav(wp)
 
 
+EXTRA = []          # model lines learned elsewhere (dynamics, bow, bodies): carried over on --resume
 HALL = {"release": 1.0, "rt60": 2.4, "hf": 0.45, "erdiff": 0.5, "spacing": 0.3}   # learned release, hall, room
 
 
@@ -138,7 +139,7 @@ def model_text(curves, unrest, er, late, out=1.0):
     lines += ["er %.4f" % er, "late %.4f" % late, "out %.4f" % out,
               "release %.3f" % HALL["release"], "hall %.3f %.3f" % (HALL["rt60"], HALL["hf"]),
               "erdiff %.3f" % HALL["erdiff"], "spacing %.3f" % HALL["spacing"]]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + EXTRA) + "\n"
 
 
 def main():
@@ -171,6 +172,7 @@ def main():
             if t and t[0] == "key": curves[int(t[1])] = np.array(list(map(float, t[2:])))
             if t and t[0] == "unrest": unrest = list(map(float, t[1:]))
             if t and t[0] in ("release",): HALL["release"] = float(t[1])
+            if t and t[0] in ("flutter", "harmvar", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
             if a.keep_room and t:
                 if t[0] == "er": er = float(t[1])
                 if t[0] == "late": late = float(t[1])
