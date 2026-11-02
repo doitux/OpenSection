@@ -16,8 +16,11 @@ recordings.
    grabs the string, it slips, flies back, is grabbed again – hundreds of times per second. Each virtual
    player has their own slight detune, drift, vibrato (a random walk, not an LFO), entry time, bow
    changes, bow-pressure unrest and rosin noise at every slip.
-2. **A section is a swarm.** 6 basses, 8 celli, 10 violas, 14 violins per note (scalable). The ensemble
-   sound emerges from many small differences – no chorus effect.
+2. **A section is a swarm.** Up to 6 basses, 8 celli, 10 violas, 14 violins per note (scalable). The
+   ensemble sound emerges from many small differences – no chorus effect. Every section keeps to
+   its real range and has a home range where it plays fully; in between, neighbouring sections
+   share a note and fade smoothly (e.g. c' is played by celli, violas and violins, mostly violas;
+   violins never below g, celli never below C).
 3. **Every desk has its own instrument.** Bodies with ~100 narrow resonances each. Vibrato sweeps the
    harmonics across these resonances – the "shimmer" of real strings.
 4. **Learned room.** Part of the room stays with each desk (the players sit *in* the hall), part is
@@ -28,7 +31,7 @@ recordings.
    room calibration (stereo width and reverb energy) – about 22 KB.
 6. **Learned dynamics.** Two more sources teach how the colour changes with bow pressure: a section
    with recorded soft and loud layers (VSCO2-CE) and solo players from pianissimo to fortissimo
-   (Philharmonia Orchestra). The engine keeps one wavetable set per learned level
+   (Philharmonia Orchestra, University of Iowa). The engine keeps one wavetable set per learned level
    (pp · soft · loud · ff); key velocity and the expression pedal glide between them – soft
    playing gets darker and the bow noise softer, fortissimo brighter. Still only two table reads
    per sample, and the loud colour stays exactly as learned.
@@ -77,8 +80,10 @@ python3 tools/learn/learn.py --vpo <Virtual-Playing-Orchestra> --sfizz-render <s
     --out models/opensection.osm
 python3 tools/learn/sources/vsco2_sfz.py <VSCO-2-CE> vsco2-strings.sfz
 python3 tools/learn/sources/philharmonia.py <Philharmonia download>/Strings philharmonia-dyn.npz
+bash tools/learn/sources/fetch_iowa_mis.sh            # on a machine with internet access
+python3 tools/learn/sources/iowa.py <unpacked Iowa-MIS-*.zip> iowa-dyn.npz
 python3 tools/learn/learn_dynamics.py --model models/opensection.osm --sfz vsco2-strings.sfz \
-    --philharmonia philharmonia-dyn.npz --sfizz-render <sfizz_render> \
+    --philharmonia philharmonia-dyn.npz --iowa iowa-dyn.npz --sfizz-render <sfizz_render> \
     --engine build/opensection-render --out models/opensection.osm
 python3 tools/learn/embed.py
 ```
@@ -93,7 +98,8 @@ only derived statistics (spectral envelopes per key, modulation depth, room widt
 The dynamics (how soft playing differs in colour from loud playing) were learned from
 **VSCO2 Community Edition** by Versilian Studios (<https://vis.versilstudios.com/vsco-community.html>,
 CC0) and from the **Philharmonia Orchestra sound samples** (<https://philharmonia.co.uk/resources/sound-samples/>,
-CC BY-SA 3.0; sound samples © Philharmonia Orchestra). Again only difference curves are stored, no
+CC BY-SA 3.0; sound samples © Philharmonia Orchestra) and the **University of Iowa Electronic Music
+Studios Musical Instrument Samples** (<https://theremin.music.uiowa.edu/MIS.html>, free for any project). Again only difference curves are stored, no
 audio. Details in [CREDITS.md](CREDITS.md).
 
 ## License

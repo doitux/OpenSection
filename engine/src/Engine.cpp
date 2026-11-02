@@ -41,11 +41,34 @@ constexpr RegisterInfo kReg[kNumRegisters] = {
     { 999, 14, 1.00f, -0.40f }, // violins    (left)
 };
 
-int registerOf(int key)
+// Which sections play a key: every section has its real range (sounding MIDI notes) and a home
+// range where it plays fully; in between the weight fades linearly, so neighbouring sections
+// share the note (players are split) and nothing jumps from one key to the next.
+struct SectionRange { int lowest, fullFrom, fullTo, highest; };
+constexpr SectionRange kRange[kNumRegisters] = {
+    { 0,   0,   38, 48 },     // basses:  everything low, fully up to D2, gone at C3
+    { 36,  43,  55, 67 },     // celli:   from C2, fully G2..G3, gone at G4
+    { 48,  55,  64, 76 },     // violas:  from C3, fully G3..E4, gone at E5
+    { 55,  64, 127, 128 },    // violins: from G3, fully from E4
+};
+
+std::array<float, kNumRegisters> sectionWeights(int key)
 {
-    for (int r = 0; r < kNumRegisters; ++r)
-        if (key < kReg[r].topKey) return r;
-    return kNumRegisters - 1;
+    std::array<float, kNumRegisters> w {};
+    float sum = 0;
+    for (int r = 0; r < kNumRegisters; ++r) {
+        const auto& R = kRange[r];
+        float x = 0;
+        if (key >= R.lowest && key < R.highest) {
+            x = 1.f;
+            if (key < R.fullFrom) x = float(key - R.lowest + 1) / float(R.fullFrom - R.lowest + 1);
+            if (key > R.fullTo) x = std::min(x, float(R.highest - key) / float(R.highest - R.fullTo));
+        }
+        w[r] = x; sum += x;
+    }
+    if (sum <= 0) { w[key < 60 ? 0 : 3] = 1.f; sum = 1.f; }
+    for (auto& x : w) x /= sum;
+    return w;
 }
 
 inline uint32_t xorshift(uint32_t& s) { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; }
@@ -94,6 +117,7 @@ struct Player {
     float nextChange = 1e9f, lastChange = -1e9f;
     float scoop = 0;                                  // intonation at the entry, settles quickly (cents)
     WanderState drift, rateJit, slowLvl, unrest;
+    int reg = 0;                                      // section this player belongs to
     float hpX = 0, hpY = 0, lpY = 0;                  // rosin-noise filters
     float inc = 0, amp = 0, mix = 0, noise = 0;       // values at chunk start
     uint32_t rng = 1;
@@ -325,23 +349,41 @@ struct Engine::Impl {
     void startVoice(Voice& v, int key, float vel)
     {
         v = Voice();
-        v.active = true; v.key = key; v.vel = vel; v.reg = registerOf(key);
+        v.active = true; v.key = key; v.vel = vel;
         v.age = ++ageCounter;
         uint32_t s = seed * 2654435761u ^ (uint32_t)(v.age * 40503u + (uint32_t)key * 9176u);
         xorshift(s); xorshift(s);
-        const int base = kReg[v.reg].players;
-        v.nPlayers = std::clamp((int)std::lround(base * p.quality), 2, std::min(base, kMaxPlayers));
+        // sections sharing this key and their players (largest remainder, no lonely soloists)
+        const auto w = sectionWeights(key);
+        float base = 0;
+        for (int r = 0; r < kNumRegisters; ++r) base += w[r] * kReg[r].players;
+        v.nPlayers = std::clamp((int)std::lround(base * p.quality), 2, kMaxPlayers);
+        int nSec[kNumRegisters] {}, given = 0;
+        float rem[kNumRegisters] {};
+        v.reg = 0;
+        for (int r = 0; r < kNumRegisters; ++r) {
+            nSec[r] = (int)std::floor(w[r] * v.nPlayers); rem[r] = w[r] * v.nPlayers - nSec[r]; given += nSec[r];
+            if (w[r] > w[v.reg]) v.reg = r;
+        }
+        while (given < v.nPlayers) {
+            int b = 0; for (int r = 1; r < kNumRegisters; ++r) if (rem[r] > rem[b]) b = r;
+            ++nSec[b]; rem[b] = -1.f; ++given;
+        }
+        for (int r = 0; r < kNumRegisters; ++r)
+            if (r != v.reg && nSec[r] == 1 && w[r] < 0.12f) { nSec[r] = 0; ++nSec[v.reg]; }
         v.secRate = 4.9f + 0.9f * urand(s);
         v.secPhase = 6.2831853f * urand(s);
         v.noteGain = std::pow(10.f, 1.2f * gauss(s) / 20.f);
         v.noteTone = 0.07f * gauss(s);
         int deskOrder[kDesks] = { 0, 1, 2, 3 };
         for (int i = kDesks - 1; i > 0; --i) std::swap(deskOrder[i], deskOrder[xorshift(s) % (i + 1)]);
-        for (int i = 0; i < v.nPlayers; ++i) {
+        for (int i = 0, r = 0, inSec = 0; i < v.nPlayers; ++i, ++inSec) {
+            while (inSec >= nSec[r]) { ++r; inSec = 0; }
             Player& pl = v.pl[i];
             pl = Player();
             pl.rng = xorshift(s) | 1u;
-            pl.bus = v.reg * kDesks + deskOrder[i % kDesks];
+            pl.reg = r;
+            pl.bus = r * kDesks + deskOrder[(inSec + r) % kDesks];
             pl.phase = urand(pl.rng);
             pl.det = gauss(pl.rng) * 6.f;
             pl.vibRate = 4.8f + 1.2f * urand(pl.rng);
@@ -402,7 +444,7 @@ struct Engine::Impl {
         const float dc = (float)t - pl.lastChange;
         env *= 1.f - 0.45f * std::exp(-(dc / 0.035f) * (dc / 0.035f));
         env *= std::pow(10.f, (1.0f * pl.slowLvl.next(wSlow, pl.rng)
-                               + p.unrest * unrestDb[v.reg] * pl.unrest.next(wUnrest, pl.rng)) / 20.f);
+                               + p.unrest * unrestDb[pl.reg] * pl.unrest.next(wUnrest, pl.rng)) / 20.f);
         // velocity: mostly tone, a little level (normalised to the learning velocity 0.71)
         // velocity -> level like a sampled section (sfz amp_veltrack 100: gain = vel^2),
         // normalised to the learning velocity 0.71; p.velocity blends towards no dynamics
@@ -432,14 +474,17 @@ struct Engine::Impl {
             // rosin noise gets darker with less bow pressure; below the learning velocity the
             // learned corner (per register) is approached exponentially
             const float pressure = v.vel * (0.45f + 0.55f * exprSmooth);
-            float fcNoise = 2500.f + 6000.f * pressure;
-            const float fcSoft = model.noiseSoftHz[v.reg];
-            if (fcSoft > 0.f && pressure < model.dynLoud) {
-                const float fcLoud = 2500.f + 6000.f * model.dynLoud;
-                fcNoise = fcLoud * std::pow(fcSoft / fcLoud, (model.dynLoud - pressure) / (model.dynLoud - model.dynSoft));
-                fcNoise = std::max(fcNoise, 400.f);
+            float lpAReg[kNumRegisters];
+            for (int r = 0; r < kNumRegisters; ++r) {
+                float fcNoise = 2500.f + 6000.f * pressure;
+                const float fcSoft = model.noiseSoftHz[r];
+                if (fcSoft > 0.f && pressure < model.dynLoud) {
+                    const float fcLoud = 2500.f + 6000.f * model.dynLoud;
+                    fcNoise = fcLoud * std::pow(fcSoft / fcLoud, (model.dynLoud - pressure) / (model.dynLoud - model.dynSoft));
+                    fcNoise = std::max(fcNoise, 400.f);
+                }
+                lpAReg[r] = std::exp(-2.f * (float)M_PI * fcNoise / (float)sr);
             }
-            const float lpA = std::exp(-2.f * (float)M_PI * fcNoise / (float)sr);
             v.t += chunkDur;
             v.secPhase += 6.2831853f * v.secRate * chunkDur;
             if (v.secPhase > 6.2831853f) v.secPhase -= 6.2831853f;
@@ -462,6 +507,7 @@ struct Engine::Impl {
                 float inc = pl.inc, amp = pl.amp, mix = w0, noi = pl.noise;
                 double ph = pl.phase;
                 float hpX = pl.hpX, hpY = pl.hpY, lpY = pl.lpY;
+                const float lpA = lpAReg[pl.reg];
                 uint32_t rs = pl.rng;
                 float* bus = busIn[pl.bus].data();
                 for (int n = 0; n < kChunk; ++n) {

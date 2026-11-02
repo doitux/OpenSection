@@ -76,6 +76,7 @@ def main():
     ap.add_argument("--sfizz-render", required=True); ap.add_argument("--engine", required=True)
     ap.add_argument("--out", required=True); ap.add_argument("--cache", default="dyn-targets.npz")
     ap.add_argument("--philharmonia", help="npz from sources/philharmonia.py (pianissimo / fortissimo)")
+    ap.add_argument("--iowa", help="npz from sources/iowa.py (pp / ff against mf)")
     ap.add_argument("--rounds", type=int, default=2)
     a = ap.parse_args()
 
@@ -87,12 +88,37 @@ def main():
                                  for k in KEYS]), wide=True)
     targets = {VEL_SOFT: np.clip(soft, -40, 6)}
     sources = ["VSCO2-CE (CC0, soft vs loud layer)"]
-    if a.philharmonia:
+    # solo sources: estimates of pp (0.2), soft (0.39) and ff (1.0) relative to forte (0.71),
+    # each with a per-key validity mask (keys without measured note pairs are left out)
+    est = {VEL_PP: [], VEL_SOFT: [], VEL_FF: []}
+    def add(v, curve, n):
+        est[v].append((smooth_keys(curve, wide=True), smooth_keys(np.asarray(n, float)[:, None] > 0, wide=True)[:, 0] > 0.5))
+    if a.philharmonia:                   # pianissimo / fortissimo against forte
         P = np.load(a.philharmonia)
-        pp = smooth_keys(P["pianissimo"], wide=True)
-        targets[VEL_PP] = np.clip(np.minimum(pp, targets[VEL_SOFT]), -40, 6)   # never brighter than soft playing
-        targets[VEL_FF] = np.clip(smooth_keys(P["fortissimo"], wide=True), -3, 8)
+        add(VEL_PP, P["pianissimo"], P["pianissimo_n"]); add(VEL_FF, P["fortissimo"], P["fortissimo_n"])
+        add(VEL_SOFT, (VEL_LOUD - VEL_SOFT) / (VEL_LOUD - VEL_PP) * P["pianissimo"], P["pianissimo_n"])
         sources.append("Philharmonia Orchestra sound samples (CC BY-SA 3.0, pianissimo/fortissimo vs forte)")
+    if a.iowa:                           # pp / ff against mf; mf ~ velocity 0.55, dB linear in velocity
+        I = np.load(a.iowa)
+        MF = 0.55
+        up = (VEL_LOUD - MF) / (VEL_FF - MF)                 # mf -> f is this part of mf -> ff
+        n = np.minimum(I["pp_n"], I["ff_n"])
+        add(VEL_PP, I["pp"] - up * I["ff"], n)
+        add(VEL_FF, (1 - up) * I["ff"], I["ff_n"])
+        add(VEL_SOFT, (MF - VEL_SOFT) / (MF - VEL_PP) * I["pp"] - up * I["ff"], n)
+        sources.append("University of Iowa Musical Instrument Samples (free, pp/mf/ff, anechoic)")
+    def mean_est(v):
+        cs = est[v]
+        num = sum(np.where(m[:, None], c, 0) for c, m in cs)
+        cnt = sum(m.astype(float) for c, m in cs)[:, None]
+        return np.where(cnt > 0, num / np.maximum(cnt, 1), 0), cnt[:, 0] > 0
+    if est[VEL_SOFT]:
+        solo, has = mean_est(VEL_SOFT)       # section (VSCO2) and solo players count half each
+        targets[VEL_SOFT] = np.clip(np.where(has[:, None], 0.5 * targets[VEL_SOFT] + 0.5 * solo, targets[VEL_SOFT]), -40, 6)
+        pp, has = mean_est(VEL_PP)
+        targets[VEL_PP] = np.clip(np.minimum(np.where(has[:, None], pp, targets[VEL_SOFT]), targets[VEL_SOFT]), -40, 6)
+        ff, has = mean_est(VEL_FF)
+        targets[VEL_FF] = np.clip(np.where(has[:, None], ff, 0), -3, 8)
     vels = sorted(targets)
     hi = lambda k: (BANDS > 2000) & (BANDS < 8000) & (BANDS > 2 * f0(k))
     for v in vels:
