@@ -22,6 +22,7 @@ struct Model {
     std::array<float, kNumRegisters> rosin { 1.f, 1.f, 1.f, 1.f };   // bow-noise level per section (x the Rosin knob)
     float harmVar = 0.f;                       // bow irregularity: independent per-harmonic spread of the tables (dB)
     std::array<float, kNumRegisters> bodyDirect { 0.3f, 0.3f, 0.3f, 0.3f };  // non-resonant part of the bodies
+    float bodySpread = 0.05f;                  // how different the instruments of one section are (± size)
     float erGain = 0.3f;                       // early reflections (room mics)
     float lateGain = 0.2f;                     // hall
     float outGain = 1.0f;                      // overall output trim

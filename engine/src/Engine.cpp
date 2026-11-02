@@ -294,7 +294,7 @@ struct Engine::Impl {
         for (int r = 0; r < kNumRegisters; ++r) {
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
-                d.body.setIR(makeBody(kReg[r].bodyScale * (0.95f + 0.1f * U(rng)), model.bodyDirect[r], rng, sr));
+                d.body.setIR(makeBody(kReg[r].bodyScale * (1.f + model.bodySpread * (2.f * U(rng) - 1.f)), model.bodyDirect[r], rng, sr));
                 d.ring.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
                 const float pan = std::clamp(kReg[r].seat + (k - 1.5f) / 1.5f * 0.75f, -1.f, 1.f);
                 d.back = (k % 2) == 1;                                   // every second desk sits further back

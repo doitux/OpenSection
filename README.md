@@ -15,7 +15,7 @@ recordings.
 1. **Every player is computed.** A bowed string moves in a sawtooth-like "Helmholtz motion": the bow
    grabs the string, it slips, flies back, is grabbed again – hundreds of times per second. Each virtual
    player has their own slight detune, drift, vibrato (a random walk, not an LFO), entry time, bow
-   changes and rosin noise at every slip. The section as a whole stays in tune; the players only
+   changes and rosin noise at every slip (its level per section measured on dry solo recordings). The section as a whole stays in tune; the players only
    spread around the note. The bow never presses evenly: every player's bow pressure flutters and
    the harmonics move independently – calibrated against dry solo recordings (University of Iowa).
 2. **A section is a swarm.** Up to 6 basses, 8 celli, 10 violas, 14 violins per note (scalable). The

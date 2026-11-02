@@ -66,6 +66,7 @@ Model Model::fromText(const std::string& text, std::string* error)
         } else if (tok == "flutter") {
             for (auto& u : m.flutter) in >> u;
         } else if (tok == "harmvar") { in >> m.harmVar;
+        } else if (tok == "bodyspread") { in >> m.bodySpread;
         } else if (tok == "rosin") {
             for (auto& u : m.rosin) in >> u;
         } else if (tok == "bodydirect") {
@@ -113,6 +114,7 @@ std::string Model::toText() const
     o << "unrest"; for (float u : unrest) o << ' ' << u; o << '\n';
     o << "flutter"; for (float u : flutter) o << ' ' << u; o << '\n';
     o << "harmvar " << harmVar << '\n';
+    o << "bodyspread " << bodySpread << '\n';
     o << "rosin"; for (float u : rosin) o << ' ' << u; o << '\n';
     o << "bodydirect"; for (float u : bodyDirect) o << ' ' << u; o << '\n';
     o << "er " << erGain << "\nlate " << lateGain << "\nout " << outGain << '\n';

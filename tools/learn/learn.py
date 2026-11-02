@@ -180,14 +180,14 @@ def main():
     if a.carry:
         for line in open(a.carry):
             t = line.split()
-            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
+            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "bodyspread", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
     if a.resume:
         for line in open(a.resume):
             t = line.split()
             if t and t[0] == "key": curves[int(t[1])] = np.array(list(map(float, t[2:])))
             if t and t[0] == "unrest": unrest = list(map(float, t[1:]))
             if t and t[0] in ("release",): HALL["release"] = float(t[1])
-            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
+            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "bodyspread", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
             if a.keep_room and t:
                 if t[0] == "er": er = float(t[1])
                 if t[0] == "late": late = float(t[1])
