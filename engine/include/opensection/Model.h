@@ -23,6 +23,12 @@ struct Model {
     float harmVar = 0.f;                       // bow irregularity: independent per-harmonic spread of the tables (dB)
     std::array<float, kNumRegisters> bodyDirect { 0.3f, 0.3f, 0.3f, 0.3f };  // non-resonant part of the bodies
     float bodySpread = 0.05f;                  // how different the instruments of one section are (± size)
+    // articulations (learned from VSCO2-CE section recordings where available)
+    std::array<float, kNumRegisters> tremRate { 9.f, 9.f, 9.f, 9.f };       // tremolo: bow strokes per second per section
+    std::array<float, kNumRegisters> tremDepth { 0.55f, 0.55f, 0.55f, 0.55f }; // depth of the dip at each stroke
+    float tremWidth = 0.38f;                   // width of that dip (fraction of a stroke)
+    std::array<float, kNumRegisters> pizzDecay { 0.9f, 0.6f, 0.45f, 0.3f };   // pizzicato: decay time constant (s) per section
+    float pizzBright = 0.3f;                   // pizzicato: the brilliance fades this much faster than the level
     float erGain = 0.3f;                       // early reflections (room mics)
     float lateGain = 0.2f;                     // hall
     float outGain = 1.0f;                      // overall output trim

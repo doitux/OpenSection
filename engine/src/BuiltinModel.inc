@@ -3,6 +3,7 @@ R"OSM(OSM1
 # dynamics learned from Philharmonia Orchestra sound samples (CC BY-SA 3.0, pianissimo/fortissimo vs forte)
 # dynamics learned from University of Iowa Musical Instrument Samples (free, pp/mf/ff, anechoic)
 # bow noise, flutter and irregularity calibrated against the University of Iowa recordings
+# tremolo speed and pizzicato decay measured on VSCO2-CE section recordings
 # learned by tools/learn/learn.py from Virtual Playing Orchestra (all-strings-SEC-sustain)
 bands 54 40.000 44.898 50.397 56.569 63.496 71.272 80.000 89.797 100.794 113.137 126.992 142.544 160.000 179.594 201.587 226.274 253.984 285.088 320.000 359.188 403.175 452.548 507.968 570.175 640.000 718.376 806.349 905.097 1015.937 1140.350 1280.000 1436.751 1612.699 1810.193 2031.873 2280.701 2560.000 2873.503 3225.398 3620.387 4063.747 4561.401 5120.000 5747.006 6450.796 7240.773 8127.493 9122.803 10240.000 11494.011 12901.592 14481.547 16254.987 18245.606
 key 28 -14.88 -7.20 2.60 11.39 14.18 12.94 13.21 13.75 9.65 6.31 6.33 8.76 6.15 9.24 14.26 5.33 1.18 5.64 15.41 4.40 1.72 4.95 -0.83 6.09 -8.45 -8.44 -4.41 -11.92 -10.02 3.26 -6.11 -6.53 -12.69 -10.58 -18.03 -9.12 -23.69 -17.38 -21.05 -1.65 -0.28 2.39 4.49 11.39 13.41 14.00 11.58 18.37 17.43 23.07 21.79 26.28 21.02 23.31
@@ -49,6 +50,8 @@ hall 3.000 0.350
 erdiff 0.500
 spacing 0.000
 flutter 0.17 0.08 0.05 0.17
+trem 7.3 8 10 11.3 0.85 0.85 0.85 0.85 0.6
+pizz 0.41 0.2 0.12 0.1 0.15
 harmvar 2
 rosin 0.35 0.37 0.38 1.05
 bodydirect 0.3 0.3 0.3 0.3

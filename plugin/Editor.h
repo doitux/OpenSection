@@ -31,9 +31,9 @@ private:
     OpenSectionLook look;
     std::vector<std::unique_ptr<Knob>> knobs;
     std::vector<Group> groups;
-    juce::ComboBox quality, exprSource;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> qualityAtt, exprAtt;
-    juce::Label qualityLabel, exprLabel;
+    juce::ComboBox quality, exprSource, articulation, hallType, preset;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> qualityAtt, exprAtt, artAtt, hallAtt;
+    juce::Label qualityLabel, exprLabel, artLabel, hallLabel, presetLabel;
     juce::String status;
     float exprShown = 1.f;
 };

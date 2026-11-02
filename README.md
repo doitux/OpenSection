@@ -37,8 +37,14 @@ recordings.
    (pp · soft · loud · ff); key velocity and the expression pedal glide between them – soft
    playing gets darker and the bow noise softer, fortissimo brighter. Still only two table reads
    per sample, and the loud colour stays exactly as learned.
-7. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
-   and an FDN hall.
+7. **Articulations.** Arco, con sordino (a mute on the bridge: the 2–4 kHz bridge hill disappears),
+   tremolo (every player bows at their own speed; stroke rates per section measured on VSCO2-CE) and
+   pizzicato (plucked, rings out on its own; decay per section from VSCO2-CE).
+8. **Arranging help.** Optional bass doubling: the basses play the lowest held note an octave lower,
+   as in a real string arrangement.
+9. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
+   and an FDN hall in four rooms (concert hall as learned, chamber, church, studio), plus a
+   three-band EQ and factory presets (e.g. "Hinter Klavier" – behind the piano).
 
 ### Real-time design
 

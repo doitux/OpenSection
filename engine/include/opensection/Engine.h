@@ -29,6 +29,10 @@ struct Params {
     float roomMic = 1.0f;      // 0 .. 2     scale of learned early reflections
     float hall = 1.0f;         // 0 .. 3     scale of learned hall
     float gainDb = 0.0f;       // output
+    int hallType = 0;          // 0 learned hall, 1 chamber, 2 church, 3 studio
+    float eqLow = 0, eqMid = 0, eqHigh = 0;   // dB: shelf 200 Hz, bell 1.2 kHz, shelf 6 kHz
+    float bassDouble = 0.0f;   // 0 .. 1  basses double the lowest held note an octave below (0 = off)
+    int articulation = 0;      // 0 arco, 1 con sordino (muted), 2 tremolo, 3 pizzicato (new notes)
     // studio switches (not live)
     bool dryOnly = false;      // no ER / hall (used for learning)
     bool solo = false;         // one player per note, main section only (used for learning the bodies)

@@ -9,6 +9,7 @@
 // options: --model file.osm  --sr 48000  --block 128  --seed N  --dry  --quality q
 //          --unrest r0,r1,r2,r3  --room er,late  --release scale,rt60,hfratio  --tail seconds
 //          --solo  --vibrato v  --flutter f0,f1,f2,f3   (learning helpers)
+//          --bassdouble level  --halltype 0..3  --eq low,mid,high (dB)
 #include "opensection/Engine.h"
 #include <algorithm>
 #include <chrono>
@@ -69,7 +70,7 @@ static void writeWav(const char* path, const std::vector<float>& L, const std::v
 int main(int argc, char** argv)
 {
     std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
-    bool dry = false, bench = false, solo = false, setFlutter = false; float vibrato = -1, flutter[4] = {}, harmvar = -1, bdir[4] = {}; bool setBody = false; float quality = 1.0f, tail = 4.0f;
+    bool dry = false, bench = false, solo = false, setFlutter = false; float bassDouble = 0, eq[3] = {}; int hallType = 0, articulation = 0; float trem[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0.38f}, pz[5] = {}; bool setTrem = false, setPizz = false; float vibrato = -1, flutter[4] = {}, harmvar = -1, bdir[4] = {}; bool setBody = false; float quality = 1.0f, tail = 4.0f;
     float coupling = -1, detune = -1, rosin = -1, spacing = -1, width = -1;
     float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
@@ -96,6 +97,12 @@ int main(int argc, char** argv)
         else if (a == "--coupling") coupling = (float)std::atof(next());
         else if (a == "--detune") detune = (float)std::atof(next());
         else if (a == "--rosin") rosin = (float)std::atof(next());
+        else if (a == "--bassdouble") bassDouble = (float)std::atof(next());
+        else if (a == "--halltype") hallType = std::atoi(next());
+        else if (a == "--art") articulation = std::atoi(next());
+        else if (a == "--trem") { std::sscanf(next(), "%f,%f,%f,%f,%f,%f,%f,%f,%f", &trem[0], &trem[1], &trem[2], &trem[3], &trem[4], &trem[5], &trem[6], &trem[7], &trem[8]); setTrem = true; }
+        else if (a == "--pizz") { std::sscanf(next(), "%f,%f,%f,%f,%f", &pz[0], &pz[1], &pz[2], &pz[3], &pz[4]); setPizz = true; }
+        else if (a == "--eq") std::sscanf(next(), "%f,%f,%f", &eq[0], &eq[1], &eq[2]);
         else if (a == "--release") std::sscanf(next(), "%f,%f,%f", &rel, &rt60, &hf);
         else pos.push_back(argv[i]);
     }
@@ -110,6 +117,8 @@ int main(int argc, char** argv)
     if (setFlutter) for (int r = 0; r < 4; ++r) model.flutter[r] = flutter[r];
     if (setBody) for (int r = 0; r < 4; ++r) model.bodyDirect[r] = bdir[r];
     if (harmvar >= 0) model.harmVar = harmvar;
+    if (setTrem) { for (int r = 0; r < 4; ++r) { model.tremRate[r] = trem[r]; model.tremDepth[r] = trem[4 + r]; } model.tremWidth = trem[8]; }
+    if (setPizz) { for (int r = 0; r < 4; ++r) model.pizzDecay[r] = pz[r]; model.pizzBright = pz[4]; }
     std::vector<Ev> evs; double end;
     if (!readNotes(pos[0], evs, end)) { std::fprintf(stderr, "cannot read %s\n", pos[0]); return 1; }
 
@@ -118,6 +127,7 @@ int main(int argc, char** argv)
     Params p; p.quality = quality; p.dryOnly = dry; p.solo = solo;
     if (coupling >= 0) p.coupling = coupling;
     if (vibrato >= 0) p.vibrato = vibrato;
+    p.bassDouble = bassDouble; p.hallType = hallType; p.articulation = articulation; p.eqLow = eq[0]; p.eqMid = eq[1]; p.eqHigh = eq[2];
     if (detune >= 0) p.detune = detune;
     if (rosin >= 0) p.rosin = rosin;
     if (spacing >= 0) p.spacing = spacing;

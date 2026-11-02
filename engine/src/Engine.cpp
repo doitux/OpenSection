@@ -108,6 +108,37 @@ struct WanderState {
     void warm(const Wander& w, uint32_t& s, int n) { for (int i = 0; i < n; ++i) next(w, s); }
 };
 
+struct Biquad {                                       // RBJ cookbook, direct form I
+    float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    void set(int type, float f, float gainDb, float q, double sr)
+    {   // type 0 low shelf, 1 bell, 2 high shelf
+        const float A = std::pow(10.f, gainDb / 40.f), w = 2.f * (float)M_PI * f / (float)sr;
+        const float cw = std::cos(w), sw = std::sin(w), al = sw / (2.f * q), sA = 2.f * std::sqrt(A) * al;
+        float B0, B1, B2, A0, A1, A2;
+        if (type == 1) { B0 = 1 + al * A; B1 = -2 * cw; B2 = 1 - al * A; A0 = 1 + al / A; A1 = -2 * cw; A2 = 1 - al / A; }
+        else if (type == 0) { B0 = A * ((A + 1) - (A - 1) * cw + sA); B1 = 2 * A * ((A - 1) - (A + 1) * cw); B2 = A * ((A + 1) - (A - 1) * cw - sA);
+                              A0 = (A + 1) + (A - 1) * cw + sA; A1 = -2 * ((A - 1) + (A + 1) * cw); A2 = (A + 1) + (A - 1) * cw - sA; }
+        else { B0 = A * ((A + 1) + (A - 1) * cw + sA); B1 = -2 * A * ((A - 1) + (A + 1) * cw); B2 = A * ((A + 1) + (A - 1) * cw - sA);
+               A0 = (A + 1) - (A - 1) * cw + sA; A1 = 2 * ((A - 1) - (A + 1) * cw); A2 = (A + 1) - (A - 1) * cw - sA; }
+        b0 = B0 / A0; b1 = B1 / A0; b2 = B2 / A0; a1 = A1 / A0; a2 = A2 / A0;
+    }
+    float process(float x)
+    {
+        const float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        return y;
+    }
+    void clear() { x1 = x2 = y1 = y2 = 0; }
+};
+
+struct HallType { float rt, hf, late, er, pre; };
+constexpr HallType kHallType[4] = {
+    { 1.00f, 1.0f, 1.00f, 1.00f, 0.025f },   // learned hall
+    { 0.55f, 1.1f, 0.80f, 0.90f, 0.012f },   // chamber: shorter, a little brighter
+    { 1.90f, 0.8f, 1.30f, 1.15f, 0.040f },   // church: long and dark
+    { 0.40f, 1.0f, 0.45f, 0.60f, 0.008f },   // studio: close and dry
+};
+
 struct Player {
     int bus = 0;
     double phase = 0;
@@ -121,6 +152,7 @@ struct Player {
     float hpX = 0, hpY = 0, lpY = 0;                  // rosin-noise filters
     float inc = 0, amp = 0, mix = 0, noise = 0;       // values at chunk start
     int variant = 0;                                  // which of the two irregular table variants
+    float tremRate = 9.f;                             // own tremolo speed
     uint32_t rng = 1;
 };
 
@@ -129,6 +161,8 @@ struct Voice {
     int key = 0, reg = 0, nPlayers = 0;
     float vel = 0.7f, rel = 1.f, steal = 1.f;
     bool stealing = false;
+    bool dbl = false;                                 // octave doubling of the lowest note (basses only)
+    int art = 0;                                      // articulation at note-on (2 tremolo, 3 pizzicato)
     double t = 0;                                     // seconds since note-on
     uint64_t age = 0;
     // the section listens to itself: part of the vibrato is shared, and every note is a bit different
@@ -210,7 +244,14 @@ struct Engine::Impl {
     Wander wDrift, wRate, wSlow, wUnrest, wFlutter;
     std::array<Voice, kMaxVoices> voices;
     std::array<Desk, kBuses> desks;
-    Hall hall;
+    Hall halls[4];
+    int hallCur = 0, hallPrev = 0, hallTail = 0;     // hall type in use; the previous one rings out
+    Biquad eq[2][3];
+    Biquad mute[kBuses][2];                           // con sordino: the mute on the bridge
+    float muteAmt = 0.f;
+    float eqSet[3] = { 1e9f, 1e9f, 1e9f };
+    int dblKey = -1;                                  // key of the doubling voice
+    float zeros[kChunk] {};
     std::array<float, kNumRegisters> unrestDb {};
     float erGain = 0, lateGain = 0, releaseScale = 1.f;
     Diffuser erDiffL, erDiffR;
@@ -336,7 +377,7 @@ struct Engine::Impl {
     void noteOn(int key, float vel)
     {
         for (auto& v : voices)                                  // same key: the old bow stops
-            if (v.active && v.key == key && !v.released) { v.released = true; v.rel = std::min(v.rel, 1.f); }
+            if (v.active && v.key == key && !v.released && !v.dbl) { v.released = true; v.rel = std::min(v.rel, 1.f); }
         int playing = 0;
         for (auto& c : voices) playing += c.active && !c.stealing;
         if (playing >= kSoftVoices) {                           // fade out the oldest (released first)
@@ -356,15 +397,40 @@ struct Engine::Impl {
         startVoice(*v, key, std::clamp(vel, 0.05f, 1.f));
     }
 
-    void startVoice(Voice& v, int key, float vel)
+    Voice* freeVoice()
+    {
+        for (auto& c : voices) if (!c.active) return &c;
+        Voice* v = nullptr;
+        for (auto& c : voices) if (c.stealing && (!v || c.steal < v->steal)) v = &c;
+        return v;
+    }
+
+    // basses double the lowest sounding note an octave below (as in a real string arrangement)
+    void updateDouble()
+    {
+        int low = 999; float vel = 0.7f;
+        if (p.bassDouble > 0.f)
+            for (auto& v : voices)
+                if (v.active && !v.released && !v.dbl && v.key < low) { low = v.key; vel = v.vel; }
+        const int want = (low <= 55 && low - 12 >= 24) ? low - 12 : -1;     // up to g, not below C1
+        if (want == dblKey) return;
+        for (auto& v : voices) if (v.active && v.dbl && !v.released) v.released = true;
+        dblKey = want;
+        if (want < 0) return;
+        if (Voice* v = freeVoice()) { startVoice(*v, want, vel, true); v->dbl = true; }
+    }
+
+    void startVoice(Voice& v, int key, float vel, bool bassOnly = false)
     {
         v = Voice();
         v.active = true; v.key = key; v.vel = vel;
+        v.art = bassOnly ? (p.articulation == 3 ? 3 : 0) : p.articulation;
         v.age = ++ageCounter;
         uint32_t s = seed * 2654435761u ^ (uint32_t)(v.age * 40503u + (uint32_t)key * 9176u);
         xorshift(s); xorshift(s);
         // sections sharing this key and their players (largest remainder, no lonely soloists)
-        const auto w = sectionWeights(key);
+        auto w = sectionWeights(key);
+        if (bassOnly) w = { 1.f, 0.f, 0.f, 0.f };
         float base = 0;
         for (int r = 0; r < kNumRegisters; ++r) base += w[r] * kReg[r].players;
         v.nPlayers = std::clamp((int)std::lround(base * p.quality), 2, kMaxPlayers);
@@ -384,7 +450,7 @@ struct Engine::Impl {
         if (p.solo) { v.nPlayers = 1; for (auto& n : nSec) n = 0; nSec[v.reg] = 1; }
         v.secRate = 4.9f + 0.9f * urand(s);
         v.secPhase = 6.2831853f * urand(s);
-        v.noteGain = std::pow(10.f, 1.2f * gauss(s) / 20.f);
+        v.noteGain = std::pow(10.f, 1.2f * gauss(s) / 20.f) * (bassOnly ? p.bassDouble : 1.f);
         v.noteTone = 0.07f * gauss(s);
         int deskOrder[kDesks] = { 0, 1, 2, 3 };
         for (int i = kDesks - 1; i > 0; --i) std::swap(deskOrder[i], deskOrder[xorshift(s) % (i + 1)]);
@@ -408,6 +474,9 @@ struct Engine::Impl {
             pl.drift.warm(wDrift, pl.rng, 40); pl.rateJit.warm(wRate, pl.rng, 20);   // short warm-up: cheap note-on
             pl.slowLvl.warm(wSlow, pl.rng, 20); pl.unrest.warm(wUnrest, pl.rng, 10); pl.press.warm(wFlutter, pl.rng, 10);
             pl.variant = i & 1;
+            pl.tremRate = model.tremRate[r] * (1.f + 0.12f * gauss(pl.rng));
+            if (v.art == 2) { pl.lastChange = pl.start; pl.nextChange = pl.start + urand(pl.rng) / pl.tremRate; }
+            if (v.art == 3) { pl.start = 0.05f * urand(pl.rng); pl.vibDepth = 0.f; pl.scoop = 0.f; }   // plucked together
             controls(v, pl, 0.0, pl.inc, pl.amp, pl.mix, pl.noise);
         }
         {   // the section as a whole plays in tune: only the spread around the note remains
@@ -420,7 +489,7 @@ struct Engine::Impl {
     void noteOff(int key)
     {
         for (auto& v : voices)
-            if (v.active && v.key == key && !v.released && !v.sustained) {
+            if (v.active && v.key == key && !v.released && !v.sustained && !v.dbl && v.art != 3) {   // pizzicato rings out
                 if (sustain) v.sustained = true; else v.released = true;
             }
     }
@@ -429,6 +498,16 @@ struct Engine::Impl {
     {
         sustain = on;
         if (!on) for (auto& v : voices) if (v.active && v.sustained) { v.sustained = false; v.released = true; }
+    }
+
+    void updateEq()
+    {
+        const float want[3] = { p.eqLow, p.eqMid, p.eqHigh };
+        for (int b = 0; b < 3; ++b) {
+            if (std::fabs(want[b] - eqSet[b]) < 0.01f) continue;
+            eqSet[b] = want[b];
+            for (int c = 0; c < 2; ++c) eq[c][b].set(b == 0 ? 0 : b == 1 ? 1 : 2, b == 0 ? 200.f : b == 1 ? 1200.f : 6000.f, want[b], b == 1 ? 0.8f : 0.7071f, sr);
+        }
     }
 
     // control values of one player at voice time t (seconds)
@@ -454,12 +533,21 @@ struct Engine::Impl {
         const float att = pl.att * p.attack * std::max(0.25f, velAtt);
         float x = std::clamp(ts / att, 0.f, 1.f);
         float env = x * x * (3.f - 2.f * x);
-        if ((float)t >= pl.nextChange && !v.released) {
+        const bool pizz = v.art == 3, trem = v.art == 2;
+        if (pizz) {                                           // plucked: fast onset, free decay
+            const float tau = model.pizzDecay[pl.reg] * std::pow(2.f, -(v.key - 48) / 36.f);   // higher notes ring shorter
+            env = ts < 0 ? 0.f : 1.6f * std::min(1.f, ts / 0.003f) * std::exp(-ts / tau);   // a pluck starts louder than a bowed note
+        }
+        if ((float)t >= pl.nextChange && !v.released && !pizz) {
             pl.lastChange = pl.nextChange;
-            pl.nextChange += 2.5f + 2.5f * urand(pl.rng);
+            pl.nextChange += trem ? (0.85f + 0.3f * urand(pl.rng)) / pl.tremRate : 2.5f + 2.5f * urand(pl.rng);
         }
         const float dc = (float)t - pl.lastChange;
-        env *= 1.f - 0.45f * std::exp(-(dc / 0.035f) * (dc / 0.035f));
+        if (trem) {                                           // tremolo: a quick bow change every stroke
+            const float w = model.tremWidth / pl.tremRate;
+            env *= 1.3f * (1.f - model.tremDepth[pl.reg] * std::exp(-(dc / w) * (dc / w)));   // same loudness as arco on average
+        } else if (!pizz)
+            env *= 1.f - 0.45f * std::exp(-(dc / 0.035f) * (dc / 0.035f));
         env *= std::pow(10.f, (1.0f * pl.slowLvl.next(wSlow, pl.rng)
                                + p.unrest * unrestDb[pl.reg] * pl.unrest.next(wUnrest, pl.rng)) / 20.f);
         // velocity: mostly tone, a little level (normalised to the learning velocity 0.71)
@@ -474,11 +562,17 @@ struct Engine::Impl {
         // bow pressure -> table sets; the bow never presses evenly: a little flutter on the colour
         const float flut = model.flutter[pl.reg] * p.unrest * pl.press.next(wFlutter, pl.rng);
         mix = std::clamp(pressure + 0.7f * v.noteTone + flut, tabQ.front(), tabQ.back());
-
         float scratch = 0.25f;
-        if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
-        if (dc >= 0) scratch += 0.8f * v.vel * std::exp(-dc / 0.05f);
-        noise = p.rosin * model.rosin[pl.reg] * scratch * 1.7320508f * keyGain[std::clamp(v.key, kKeyLo, kKeyHi)];
+        if (pizz) {                                           // the brilliance of the pluck fades faster than the tone
+            const float tau = model.pizzDecay[pl.reg] * std::pow(2.f, -(v.key - 48) / 36.f) * model.pizzBright;
+            const float q0 = std::min(tabQ.back(), 0.45f + 0.55f * v.vel);
+            mix = std::clamp(tabQ.front() + (q0 - tabQ.front()) * std::exp(-std::max(ts, 0.f) / tau), tabQ.front(), tabQ.back());
+            scratch = ts >= 0 ? 2.5f * v.vel * std::exp(-ts / 0.006f) : 0.f;      // finger noise only at the pluck
+        } else {
+            if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
+            if (dc >= 0) scratch += 0.8f * v.vel * std::exp(-dc / (trem ? 0.02f : 0.05f));
+        }
+        noise = p.rosin * model.rosin[pl.reg] * (p.articulation == 1 ? 0.6f : 1.f) * scratch * 1.7320508f * keyGain[std::clamp(v.key, kKeyLo, kKeyHi)];
     }
 
     // ------------------------------------------------------------------ render one 64-sample chunk
@@ -507,7 +601,8 @@ struct Engine::Impl {
             v.t += chunkDur;
             v.secPhase += 6.2831853f * v.secRate * chunkDur;
             if (v.secPhase > 6.2831853f) v.secPhase -= 6.2831853f;
-            if (v.released) v.rel *= std::exp(-chunkDur / (0.22f * releaseScale * p.release));
+            if (v.released) v.rel *= std::exp(-chunkDur / (v.art == 3 ? 0.12f * p.release : 0.22f * releaseScale * p.release));
+            if (v.art == 3 && v.t > 9.0 * model.pizzDecay[v.reg]) v.released = true, v.rel = std::min(v.rel, 1e-5f);   // rung out
             if (v.stealing) v.steal *= std::exp(-chunkDur / 0.012f);
             for (int i = 0; i < v.nPlayers; ++i) {
                 Player& pl = v.pl[i];
@@ -555,8 +650,19 @@ struct Engine::Impl {
         std::memset(erL, 0, sizeof erL); std::memset(erR, 0, sizeof erR);
         float body[kChunk];
         const float erDiff = model.erDiffuse;
+        const float muteWant = p.articulation == 1 ? 1.f : 0.f;
+        if (muteAmt == 0.f && muteWant > 0.f) for (auto& m : mute) { m[0].clear(); m[1].clear(); }
+        muteAmt += (muteWant - muteAmt) * 0.03f;
+        if (muteAmt < 1e-3f && muteWant == 0.f) muteAmt = 0.f;
         for (int b = 0; b < kBuses; ++b) {
             Desk& d = desks[b];
+            if (muteAmt > 0.f) {                               // heavier bridge: the bridge hill (2-4 kHz) is gone, a little nasal
+                float* x = busIn[b].data();
+                for (int n = 0; n < kChunk; ++n) {
+                    const float y = mute[b][1].process(mute[b][0].process(x[n]));
+                    x[n] += muteAmt * (y - x[n]);
+                }
+            }
             const float* in = busIn[b].data();
             bool silent = true;
             for (int n = 0; n < kChunk; ++n) if (in[n] != 0.f) { silent = false; break; }
@@ -588,7 +694,10 @@ struct Engine::Impl {
             for (int n = 0; n < kChunk; ++n) { outL[n] = g * dryL[n]; outR[n] = g * dryR[n]; }
             return;
         }
-        const float eg = erGain * p.roomMic, lg = lateGain * p.hall, cg = p.closeMic;
+        const int ht = std::clamp(p.hallType, 0, 3);
+        if (ht != hallCur) { hallPrev = hallCur; hallCur = ht; halls[hallCur].clear(); hallTail = (int)(4.0 * sr / kChunk); }
+        const HallType& H = kHallType[hallCur];
+        const float eg = erGain * p.roomMic * H.er, lg = lateGain * p.hall * H.late, cg = p.closeMic;
         for (int n = 0; n < kChunk; ++n) {                     // walls swallow highs
             erLpL += erLpA * (erL[n] - erLpL); erL[n] = erDiffL.process(erLpL);   // dense, not comb-like
             erLpR += erLpA * (erR[n] - erLpR); erR[n] = erDiffR.process(erLpR);
@@ -596,8 +705,17 @@ struct Engine::Impl {
             outL[n] = cg * dryL[n] + eg * erL[n];
             outR[n] = cg * dryR[n] + eg * erR[n];
         }
-        hall.process(late, outL, outR, kChunk, lg);
-        for (int n = 0; n < kChunk; ++n) { outL[n] *= g; outR[n] *= g; }
+        halls[hallCur].process(late, outL, outR, kChunk, lg);
+        if (hallTail > 0) {                                    // the previous room rings out
+            --hallTail;
+            halls[hallPrev].process(zeros, outL, outR, kChunk, lateGain * p.hall * kHallType[hallPrev].late);
+        }
+        const bool eqOn = eqSet[0] != 0.f || eqSet[1] != 0.f || eqSet[2] != 0.f;
+        for (int n = 0; n < kChunk; ++n) {
+            float l = outL[n] * g, r = outR[n] * g;
+            if (eqOn) for (int b = 0; b < 3; ++b) { l = eq[0][b].process(l); r = eq[1][b].process(r); }
+            outL[n] = l; outR[n] = r;
+        }
     }
 };
 
@@ -618,7 +736,11 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->erGain = d->model.erGain; d->lateGain = d->model.lateGain;
     d->buildTables();
     d->buildDesks();
-    d->hall.prepare(sampleRate, d->model.hallRt60, d->model.hallHf);
+    for (int i = 0; i < 4; ++i)
+        d->halls[i].prepare(sampleRate, d->model.hallRt60 * kHallType[i].rt, std::min(0.95f, d->model.hallHf * kHallType[i].hf), kHallType[i].pre);
+    for (auto& c : d->eq) for (auto& b : c) b.clear();
+    for (auto& m : d->mute) { m[0].set(1, 2800.f, -11.f, 0.6f, sampleRate); m[1].set(2, 5500.f, -6.f, 0.7071f, sampleRate); }
+    for (auto& e : d->eqSet) e = 1e9f;
     d->releaseScale = d->model.release;
     d->erDiffL.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);
     d->erDiffR.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);   // same diffusion: keeps the coherent part coherent
@@ -632,6 +754,7 @@ void Engine::setParams(const Params& p)
     const bool widthChanged = p.width != d->p.width || p.spacing != d->p.spacing;
     d->p = p;
     if (widthChanged) d->updatePans();
+    d->updateEq();
 }
 
 void Engine::setUnrestOverride(int reg, float db) { if (reg >= 0 && reg < kNumRegisters) d->unrestDb[reg] = db; }
@@ -639,14 +762,16 @@ void Engine::setRoomOverride(float er, float late) { d->erGain = er; d->lateGain
 void Engine::setReleaseOverride(float release, float rt60, float hf)
 {
     d->releaseScale = release;
-    d->hall.prepare(d->sr, rt60, hf);
+    for (int i = 0; i < 4; ++i)
+        d->halls[i].prepare(d->sr, rt60 * kHallType[i].rt, std::min(0.95f, hf * kHallType[i].hf), kHallType[i].pre);
 }
 
 void Engine::reset()
 {
     for (auto& v : d->voices) v.active = false;
     for (auto& ds : d->desks) { ds.body.clear(); std::fill(ds.ring.begin(), ds.ring.end(), 0.f); }
-    d->hall.clear(); d->erDiffL.clear(); d->erDiffR.clear();
+    for (auto& h : d->halls) h.clear();
+    d->erDiffL.clear(); d->erDiffR.clear(); d->dblKey = -1;
     d->fifoN = 0; d->sustain = false;
 }
 
@@ -668,6 +793,7 @@ void Engine::process(float* left, float* right, int numSamples, const Event* eve
                 case Event::AllOff: for (auto& v : m.voices) if (v.active) v.released = true; break;
                 }
             }
+            m.updateDouble();
             m.renderChunk(m.fifoL.data(), m.fifoR.data());
             m.fifoN = kChunk;
         }

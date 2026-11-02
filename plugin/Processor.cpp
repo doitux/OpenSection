@@ -22,6 +22,50 @@ static const char* hall = "hall";
 static const char* gain = "gain";
 static const char* exprSource = "exprSource";
 static const char* expression = "expression";
+static const char* articulation = "articulation";
+static const char* hallType = "hallType";
+static const char* bassDouble = "bassDouble";
+static const char* eqLow = "eqLow";
+static const char* eqMid = "eqMid";
+static const char* eqHigh = "eqHigh";
+}
+
+// factory presets: only the listed parameters change, everything else goes back to its default
+struct Preset { const char* name; std::vector<std::pair<const char*, float>> values; };
+static const std::vector<Preset>& presets()
+{
+    static const std::vector<Preset> list = {
+        { "Standard", {} },
+        { "Hinter Klavier", { { ids::attack, 1.4f }, { ids::release, 1.3f }, { ids::closeMic, 0.8f }, { ids::roomMic, 1.1f },
+                              { ids::eqLow, -2.5f }, { ids::eqMid, -1.5f }, { ids::eqHigh, -1.f }, { ids::velocity, 0.7f },
+                              { ids::vibrato, 0.9f }, { ids::gain, -8.f } } },
+        { "Weit & weich", { { ids::attack, 1.8f }, { ids::release, 1.8f }, { ids::width, 1.35f }, { ids::closeMic, 0.6f },
+                            { ids::roomMic, 1.3f }, { ids::hall, 1.4f }, { ids::hallType, 2.f }, { ids::eqHigh, -3.f },
+                            { ids::vibrato, 0.8f }, { ids::rosin, 0.6f }, { ids::gain, -7.f } } },
+        { "Nah & klar", { { ids::attack, 0.8f }, { ids::release, 0.8f }, { ids::closeMic, 1.3f }, { ids::roomMic, 0.7f },
+                          { ids::hall, 0.6f }, { ids::hallType, 1.f }, { ids::eqHigh, 1.5f }, { ids::spacing, 0.8f } } },
+        { "Fundament", { { ids::bassDouble, 0.8f }, { ids::eqLow, 2.f }, { ids::release, 1.2f }, { ids::gain, -7.f } } },
+        { "Dämpfer-Fläche", { { ids::articulation, 1.f }, { ids::attack, 1.6f }, { ids::release, 1.5f }, { ids::hall, 1.3f },
+                              { ids::vibrato, 0.85f }, { ids::gain, -4.f } } },
+        { "Tremolo", { { ids::articulation, 2.f }, { ids::attack, 0.7f }, { ids::hall, 1.2f } } },
+        { "Pizzicato", { { ids::articulation, 3.f }, { ids::roomMic, 1.2f }, { ids::hall, 1.2f } } },
+    };
+    return list;
+}
+
+int OpenSectionProcessor::getNumPrograms() { return (int)presets().size(); }
+const String OpenSectionProcessor::getProgramName(int i) { return i >= 0 && i < getNumPrograms() ? String::fromUTF8(presets()[(size_t)i].name) : String(); }
+void OpenSectionProcessor::setCurrentProgram(int i)
+{
+    if (i < 0 || i >= getNumPrograms()) return;
+    currentProgram = i;
+    for (auto* prm : getParameters())
+        if (auto* r = dynamic_cast<RangedAudioParameter*>(prm)) {
+            if (r->getParameterID() == ids::exprSource || r->getParameterID() == ids::quality) continue;   // the player's setup stays
+            float v = r->convertFrom0to1(r->getDefaultValue());
+            for (auto& kv : presets()[(size_t)i].values) if (r->getParameterID() == kv.first) v = kv.second;
+            r->setValueNotifyingHost(r->convertTo0to1(v));
+        }
 }
 
 APVTS::ParameterLayout OpenSectionProcessor::layout()
@@ -53,6 +97,15 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::exprSource, 1 }, "Expression source",
                                                        StringArray { "CC11 Expression", "CC1 Mod wheel", "CC2 Breath", "Off (use knob)" }, 0));
     add(ids::expression, "Bow pressure", 0.f, 1.f, 1.f);
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::articulation, 1 }, "Articulation",
+                                                       StringArray { "Arco", "Con sordino", "Tremolo", "Pizzicato" }, 0));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::hallType, 1 }, "Room",
+                                                       StringArray { "Concert hall", "Chamber", "Church", "Studio" }, 0));
+    add(ids::bassDouble, "Bass doubling", 0.f, 1.f, 0.f);
+    auto db = [](float v, int) { return (v > 0 ? "+" : "") + String(v, 1) + " dB"; };
+    add(ids::eqLow, "EQ low", -12.f, 12.f, 0.f, -1, db);
+    add(ids::eqMid, "EQ mid", -12.f, 12.f, 0.f, -1, db);
+    add(ids::eqHigh, "EQ high", -12.f, 12.f, 0.f, -1, db);
     return { p.begin(), p.end() };
 }
 
@@ -95,6 +148,10 @@ opensection::Params OpenSectionProcessor::readParams() const
     p.roomMic = v(ids::roomMic);
     p.hall = v(ids::hall);
     p.gainDb = v(ids::gain);
+    p.articulation = (int)v(ids::articulation);
+    p.hallType = (int)v(ids::hallType);
+    p.bassDouble = v(ids::bassDouble);
+    p.eqLow = v(ids::eqLow); p.eqMid = v(ids::eqMid); p.eqHigh = v(ids::eqHigh);
     return p;
 }
 
