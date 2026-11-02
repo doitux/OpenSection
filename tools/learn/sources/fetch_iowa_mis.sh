@@ -61,8 +61,28 @@ convert() {   # AIFF -> FLAC right away (saves space during the whole run)
   [ $FLAC = 1 ] || return 0
   kb=$(du -k "$f" | cut -f1)
   room_for "$kb" || stop_full "Umwandeln"
-  nice ffmpeg -nostdin -v error -y -i "$f" -ar 48000 -c:a flac -compression_level 8 -f flac "${f%.*}.flac.part" \
-    && mv "${f%.*}.flac.part" "${f%.*}.flac" && rm -f "$f"
+  if nice ffmpeg -nostdin -v quiet -y -i "$f" -ar 48000 -c:a flac -compression_level 8 -f flac "${f%.*}.flac.part"; then
+    mv "${f%.*}.flac.part" "${f%.*}.flac" && rm -f "$f"
+  else                                   # not readable as audio: keep the original, carry on
+    rm -f "${f%.*}.flac.part"; echo; echo "  Hinweis: konnte nicht umwandeln, bleibt als AIFF: $(basename "$f")"
+  fi
+  return 0
+}
+
+finish_zip() {   # $1 = zip file, $2 = folder: unpack (without macOS metadata), convert, mark done
+  local z="$1" d="$2"
+  if [ -e "$z" ]; then
+    unzip -oq "$z" -d "$d" -x '__MACOSX/*' '*/__MACOSX/*' '._*' '*/._*' 2>&1 | grep -v 'excluded filename not matched'
+    case "${PIPESTATUS[0]}" in
+      0|11) rm -f "$z" ;;                # 11: an exclusion pattern simply did not occur
+      *) echo; echo "  Hinweis: ZIP defekt, wird beim nächsten Start neu geladen: $(basename "$z")"; rm -rf "$z" "$d"; return 0 ;;
+    esac
+  fi
+  rm -rf "$d/__MACOSX"; find "$d" -name '__MACOSX' -type d -prune -exec rm -rf {} + 2>/dev/null
+  find "$d" -name '._*' -type f -delete 2>/dev/null
+  find "$d" -type f \( -iname '*.aif' -o -iname '*.aiff' \) -print0 \
+    | while IFS= read -r -d '' f; do convert "$f" || exit 2; done || exit 2
+  touch "$d.done"
 }
 
 PAGES="MISviolin.html MISviola.html MIScello.html MISdoublebass.html
@@ -99,7 +119,11 @@ for p in $PAGES; do
     total=$((total + 1))
     dst="$WORK/$series/$name"; stem="${dst%.*}"
     if [ -e "$stem.flac" ] || [ -e "$stem.done" ]; then got=$((got + 1)); continue; fi
-    if [ -e "$dst" ]; then convert "$dst"; got=$((got + 1)); continue; fi
+    case "$dst" in
+      *.zip|*.ZIP)   # interrupted earlier: finish unpacking/converting without a new download
+        if [ -e "$dst" ] || [ -d "$stem" ]; then finish_zip "$dst" "$stem" || exit 2; got=$((got + 1)); continue; fi ;;
+      *) if [ -e "$dst" ]; then convert "$dst"; got=$((got + 1)); continue; fi ;;
+    esac
     src=$(resolve "$url" "$href")
     # size of the file (if the server says it), otherwise assume 500 MB to be safe
     len=$(curl -fsSIL "$src" 2>/dev/null | tr -d '\r' | awk 'tolower($1) == "content-length:" {n = $2} END {print n + 0}')
@@ -113,11 +137,7 @@ for p in $PAGES; do
       mv "$dst.part" "$dst"; got=$((got + 1))
       printf '\r  %d geladen, frei %s GB ' "$got" "$(gb "$(free_kb)")"
       case "$dst" in
-        *.zip|*.ZIP)
-          unzip -oq "$dst" -d "$stem" && rm -f "$dst"
-          find "$stem" -type f \( -iname '*.aif' -o -iname '*.aiff' \) -print0 \
-            | while IFS= read -r -d '' f; do convert "$f" || exit 2; done || exit 2
-          touch "$stem.done" ;;
+        *.zip|*.ZIP) finish_zip "$dst" "$stem" || exit 2 ;;
         *) convert "$dst" || exit 2 ;;
       esac
     else
