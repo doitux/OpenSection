@@ -222,7 +222,7 @@ def main():
     def room_search(er, late, passes=2):
         """coordinate search over room mic level, hall level, how much room stays with the
         desk (coherent) and the main-mic spacing"""
-        grids = {"er": np.linspace(0.1, 2.0, 7), "late": np.linspace(0.0, 1.0, 6),
+        grids = {"er": np.linspace(0.1, 2.0, 7), "late": np.linspace(0.1, 1.0, 7),
                  "erdiff": np.array([0.0, 0.25, 0.5, 0.75, 1.0]), "spacing": np.array([0.0, 0.25, 0.5, 0.8])}
         cur = {"er": er, "late": late}
         best = room_cost(er, late)
