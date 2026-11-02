@@ -43,7 +43,7 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     add(ids::vibrato, "Vibrato", 0.f, 2.f, 1.f);
     add(ids::unrest, "Unrest", 0.f, 2.f, 1.f);
     add(ids::rosin, "Rosin", 0.f, 4.f, 2.f, 2.f);
-    add(ids::detune, "Intonation spread", 0.f, 4.f, 2.5f, 2.5f);
+    add(ids::detune, "Intonation spread", 0.f, 4.f, 1.2f, 1.2f);
     add(ids::spacing, "Mic spacing", 0.f, 2.f, 1.f);
     add(ids::velocity, "Velocity", 0.f, 1.f, 1.f);
     add(ids::closeMic, "Close mics", 0.f, 2.f, 1.f);

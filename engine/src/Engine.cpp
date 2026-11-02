@@ -116,10 +116,11 @@ struct Player {
     float start = 0, att = 0.5f;
     float nextChange = 1e9f, lastChange = -1e9f;
     float scoop = 0;                                  // intonation at the entry, settles quickly (cents)
-    WanderState drift, rateJit, slowLvl, unrest;
+    WanderState drift, rateJit, slowLvl, unrest, press;
     int reg = 0;                                      // section this player belongs to
     float hpX = 0, hpY = 0, lpY = 0;                  // rosin-noise filters
     float inc = 0, amp = 0, mix = 0, noise = 0;       // values at chunk start
+    int variant = 0;                                  // which of the two irregular table variants
     uint32_t rng = 1;
 };
 
@@ -149,7 +150,7 @@ struct Desk {
     bool active = false;
 };
 
-std::vector<float> makeBody(float scale, std::mt19937& rng, double sr)
+std::vector<float> makeBody(float scale, float direct, std::mt19937& rng, double sr)
 {
     std::uniform_real_distribution<float> U(0.f, 1.f);
     std::vector<float> freqs;
@@ -181,7 +182,7 @@ std::vector<float> makeBody(float scale, std::mt19937& rng, double sr)
         for (int i = 0; i < n; ++i) { ir[i] += (float)(env * std::sin(ph)); env *= d; ph += w; }
     }
     float peak = 0; for (float v : ir) peak = std::max(peak, std::fabs(v));
-    ir[0] += 0.3f * peak;                                      // direct, non-resonant part
+    ir[0] += direct * peak;                                    // direct, non-resonant part (learned)
     double e = 0; for (float v : ir) e += (double)v * v;
     const float g = (float)(1.0 / std::sqrt(e + 1e-20));
     for (auto& v : ir) v *= g;
@@ -204,8 +205,9 @@ struct Engine::Impl {
 
     std::vector<std::vector<float>> tabs;             // one table set per bow pressure: [key][kTableLen+1]
     std::vector<float> tabQ;                          // bow pressure of each set, ascending
+    size_t nVar = 1;                                  // irregular variants per set (tabs[set * nVar + variant])
     std::array<float, 128> keyGain {};                 // table RMS relative to a plain saw
-    Wander wDrift, wRate, wSlow, wUnrest;
+    Wander wDrift, wRate, wSlow, wUnrest, wFlutter;
     std::array<Voice, kMaxVoices> voices;
     std::array<Desk, kBuses> desks;
     Hall hall;
@@ -244,14 +246,19 @@ struct Engine::Impl {
             std::sort(lv.begin(), lv.end(), [](const Lvl& a, const Lvl& b) { return a.q < b.q; });
         } else lv = { { 0.3f, -2 }, { 1.0f, -3 } };
         tabQ.clear(); for (auto& l : lv) tabQ.push_back(l.q);
-        tabs.assign(lv.size(), std::vector<float>((size_t)nKeys * (kTableLen + 1), 0.f));
+        nVar = model.harmVar > 0.f ? 2 : 1;
+        tabs.assign(lv.size() * nVar, std::vector<float>((size_t)nKeys * (kTableLen + 1), 0.f));
         const float m0 = std::clamp((model.dynLoud - 0.3f) / 0.7f, 0.f, 1.f);
         std::vector<float> amp;
         for (int key = kKeyLo; key <= kKeyHi; ++key) {
             const float f0 = 440.f * std::pow(2.f, (key - 69) / 12.f);
             const int nh = std::min(kTableLen / 2 - 1, (int)(fmax / f0));
             double eRef = 0;
-            for (size_t t = 0; t < lv.size(); ++t) {
+            for (size_t t = 0; t < lv.size() * nVar; ++t) {
+                const size_t lvl = t / nVar;
+                // bow irregularity: every variant gets its own small per-harmonic deviations
+                std::mt19937 vr((uint32_t)(key * 7919 + (int)t * 104729 + 17));
+                std::normal_distribution<float> N01(0.f, 1.f);
                 amp.assign(nh + 1, 0.f);
                 for (int h = 1; h <= nh; ++h) {
                     const float f = h * f0;
@@ -261,9 +268,10 @@ struct Engine::Impl {
                     const float aH = base / std::sqrt(1.f + std::pow(f / 8500.f, 4.f));
                     if (t == 0) eRef += 0.5 * (double)aH * aH;
                     const float c = aS + m0 * (aH - aS);           // what the loud colour was learned with
-                    const int node = lv[t].node;
+                    const int node = lv[lvl].node;
                     amp[h] = node == -2 ? aS : node == -3 ? aH : node == -1 ? c
                            : c * std::pow(10.f, std::clamp(model.dynDb((size_t)node, key, f), -40.f, 8.f) / 20.f);
+                    if (nVar > 1 && h > 1) amp[h] *= std::pow(10.f, model.harmVar * N01(vr) / 20.f);
                 }
                 std::fill(re.begin(), re.end(), 0.f); std::fill(im.begin(), im.end(), 0.f);
                 for (int h = 1; h <= nh; ++h) { im[h] = -amp[h] / 2.f; im[kTableLen - h] = amp[h] / 2.f; }
@@ -284,7 +292,7 @@ struct Engine::Impl {
         for (int r = 0; r < kNumRegisters; ++r) {
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
-                d.body.setIR(makeBody(kReg[r].bodyScale * (0.95f + 0.1f * U(rng)), rng, sr));
+                d.body.setIR(makeBody(kReg[r].bodyScale * (0.95f + 0.1f * U(rng)), model.bodyDirect[r], rng, sr));
                 d.ring.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
                 const float pan = std::clamp(kReg[r].seat + (k - 1.5f) / 1.5f * 0.75f, -1.f, 1.f);
                 d.back = (k % 2) == 1;                                   // every second desk sits further back
@@ -396,8 +404,14 @@ struct Engine::Impl {
             pl.att = 0.35f + 0.45f * urand(pl.rng);
             pl.nextChange = pl.start + 1.5f + 3.f * urand(pl.rng);
             pl.drift.warm(wDrift, pl.rng, 40); pl.rateJit.warm(wRate, pl.rng, 20);   // short warm-up: cheap note-on
-            pl.slowLvl.warm(wSlow, pl.rng, 20); pl.unrest.warm(wUnrest, pl.rng, 10);
+            pl.slowLvl.warm(wSlow, pl.rng, 20); pl.unrest.warm(wUnrest, pl.rng, 10); pl.press.warm(wFlutter, pl.rng, 10);
+            pl.variant = i & 1;
             controls(v, pl, 0.0, pl.inc, pl.amp, pl.mix, pl.noise);
+        }
+        {   // the section as a whole plays in tune: only the spread around the note remains
+            float m = 0; for (int i = 0; i < v.nPlayers; ++i) m += v.pl[i].det;
+            m /= (float)v.nPlayers;
+            for (int i = 0; i < v.nPlayers; ++i) v.pl[i].det -= m;
         }
     }
 
@@ -455,7 +469,9 @@ struct Engine::Impl {
         amp = env * velAmp * exAmp * v.noteGain * v.rel * v.steal / std::sqrt((float)v.nPlayers);
 
         const float pressure = std::clamp(v.vel * (0.45f + 0.55f * ex), 0.f, 1.f);
-        mix = std::clamp(pressure + 0.7f * v.noteTone, tabQ.front(), tabQ.back());   // bow pressure -> table sets
+        // bow pressure -> table sets; the bow never presses evenly: a little flutter on the colour
+        const float flut = model.flutter[pl.reg] * p.unrest * pl.press.next(wFlutter, pl.rng);
+        mix = std::clamp(pressure + 0.7f * v.noteTone + flut, tabQ.front(), tabQ.back());
 
         float scratch = 0.25f;
         if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
@@ -502,8 +518,9 @@ struct Engine::Impl {
                 while (seg + 2 < tabQ.size() && mix1 > tabQ[seg + 1]) ++seg;
                 const float qLo = tabQ[seg], qSpan = tabQ[seg + 1] - qLo;
                 const float w0 = std::clamp((pl.mix - qLo) / qSpan, 0.f, 1.f), w1 = std::clamp((mix1 - qLo) / qSpan, 0.f, 1.f);
-                const float* ts = table(tabs[seg], v.key);
-                const float* th = table(tabs[seg + 1], v.key);
+                const size_t va = (size_t)pl.variant % nVar, vb = nVar > 1 ? 1 - va : 0;   // different variants: harmonics move independently
+                const float* ts = table(tabs[seg * nVar + va], v.key);
+                const float* th = table(tabs[(seg + 1) * nVar + vb], v.key);
                 const float dMix = (w1 - w0) * k, dNoi = (noi1 - pl.noise) * k;
                 float inc = pl.inc, amp = pl.amp, mix = w0, noi = pl.noise;
                 double ph = pl.phase;
@@ -594,6 +611,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->wRate.setup(0.8f, d->ctrlRate);
     d->wSlow.setup(0.7f, d->ctrlRate);
     d->wUnrest.setup(7.0f, d->ctrlRate);
+    d->wFlutter.setup(4.0f, d->ctrlRate);
     d->unrestDb = d->model.unrest;
     d->erGain = d->model.erGain; d->lateGain = d->model.lateGain;
     d->buildTables();

@@ -22,7 +22,7 @@ struct Params {
     float rosin = 2.0f;        // 0 .. 3     bow noise / scratch
     float velocity = 1.0f;     // 0 .. 1     key velocity -> loudness + faster/harder attack
     float coupling = 0.1f;     // 0 .. 1     how much of the vibrato the section shares
-    float detune = 2.5f;       // 0 .. 3     spread of the players' tuning (x 6 cents)
+    float detune = 1.2f;       // 0 .. 4     spread of the players' tuning (x 6 cents; the section stays centred)
     float expression = 1.0f;   // 0 .. 1     bow pressure (CC11 by default)
     // microphones / room
     float closeMic = 1.0f;     // 0 .. 2     dry (close) signal

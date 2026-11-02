@@ -18,6 +18,9 @@ struct Model {
     std::vector<int> keys;                     // learned keys, ascending
     std::vector<std::vector<float>> curves;    // [key][band] dB
     std::array<float, kNumRegisters> unrest { 1.5f, 1.5f, 1.5f, 0.5f };  // bow-pressure unrest (dB)
+    std::array<float, kNumRegisters> flutter {};  // bow-pressure flutter on the tone colour (std, pressure units)
+    float harmVar = 0.f;                       // bow irregularity: independent per-harmonic spread of the tables (dB)
+    std::array<float, kNumRegisters> bodyDirect { 0.3f, 0.3f, 0.3f, 0.3f };  // non-resonant part of the bodies
     float erGain = 0.3f;                       // early reflections (room mics)
     float lateGain = 0.2f;                     // hall
     float outGain = 1.0f;                      // overall output trim

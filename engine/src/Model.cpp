@@ -63,6 +63,11 @@ Model Model::fromText(const std::string& text, std::string* error)
             for (auto& v : m.curves.back()) in >> v;
         } else if (tok == "unrest") {
             for (auto& u : m.unrest) in >> u;
+        } else if (tok == "flutter") {
+            for (auto& u : m.flutter) in >> u;
+        } else if (tok == "harmvar") { in >> m.harmVar;
+        } else if (tok == "bodydirect") {
+            for (auto& u : m.bodyDirect) in >> u;
         } else if (tok == "er") { in >> m.erGain;
         } else if (tok == "late") { in >> m.lateGain;
         } else if (tok == "out") { in >> m.outGain;
@@ -104,6 +109,9 @@ std::string Model::toText() const
         o << '\n';
     }
     o << "unrest"; for (float u : unrest) o << ' ' << u; o << '\n';
+    o << "flutter"; for (float u : flutter) o << ' ' << u; o << '\n';
+    o << "harmvar " << harmVar << '\n';
+    o << "bodydirect"; for (float u : bodyDirect) o << ' ' << u; o << '\n';
     o << "er " << erGain << "\nlate " << lateGain << "\nout " << outGain << '\n';
     o << "release " << release << "\nhall " << hallRt60 << ' ' << hallHf << '\n';
     o << "erdiff " << erDiffuse << "\nspacing " << spacing << '\n';

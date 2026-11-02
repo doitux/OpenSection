@@ -8,6 +8,7 @@
 //                   cc <time_s> <64|11> <value 0..1>        (sustain / expression)
 // options: --model file.osm  --sr 48000  --block 128  --seed N  --dry  --quality q
 //          --unrest r0,r1,r2,r3  --room er,late  --release scale,rt60,hfratio  --tail seconds
+//          --solo  --vibrato v  --flutter f0,f1,f2,f3   (learning helpers)
 #include "opensection/Engine.h"
 #include <algorithm>
 #include <chrono>
@@ -68,7 +69,7 @@ static void writeWav(const char* path, const std::vector<float>& L, const std::v
 int main(int argc, char** argv)
 {
     std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
-    bool dry = false, bench = false, solo = false; float quality = 1.0f, tail = 4.0f;
+    bool dry = false, bench = false, solo = false, setFlutter = false; float vibrato = -1, flutter[4] = {}, harmvar = -1, bdir[4] = {}; bool setBody = false; float quality = 1.0f, tail = 4.0f;
     float coupling = -1, detune = -1, rosin = -1, spacing = -1, width = -1;
     float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
@@ -81,6 +82,10 @@ int main(int argc, char** argv)
         else if (a == "--seed") seed = (uint32_t)std::atoi(next());
         else if (a == "--dry") dry = true;
         else if (a == "--solo") solo = true;
+        else if (a == "--vibrato") vibrato = (float)std::atof(next());
+        else if (a == "--harmvar") harmvar = (float)std::atof(next());
+        else if (a == "--bodydirect") { std::sscanf(next(), "%f,%f,%f,%f", &bdir[0], &bdir[1], &bdir[2], &bdir[3]); setBody = true; }
+        else if (a == "--flutter") { std::sscanf(next(), "%f,%f,%f,%f", &flutter[0], &flutter[1], &flutter[2], &flutter[3]); setFlutter = true; }
         else if (a == "--bench") bench = true;
         else if (a == "--quality") quality = (float)std::atof(next());
         else if (a == "--tail") tail = (float)std::atof(next());
@@ -102,6 +107,9 @@ int main(int argc, char** argv)
         std::string err; model = Model::fromText(ss.str(), &err);
         if (!err.empty()) { std::fprintf(stderr, "model: %s\n", err.c_str()); return 1; }
     }
+    if (setFlutter) for (int r = 0; r < 4; ++r) model.flutter[r] = flutter[r];
+    if (setBody) for (int r = 0; r < 4; ++r) model.bodyDirect[r] = bdir[r];
+    if (harmvar >= 0) model.harmVar = harmvar;
     std::vector<Ev> evs; double end;
     if (!readNotes(pos[0], evs, end)) { std::fprintf(stderr, "cannot read %s\n", pos[0]); return 1; }
 
@@ -109,6 +117,7 @@ int main(int argc, char** argv)
     eng.prepare(sr, block);
     Params p; p.quality = quality; p.dryOnly = dry; p.solo = solo;
     if (coupling >= 0) p.coupling = coupling;
+    if (vibrato >= 0) p.vibrato = vibrato;
     if (detune >= 0) p.detune = detune;
     if (rosin >= 0) p.rosin = rosin;
     if (spacing >= 0) p.spacing = spacing;
