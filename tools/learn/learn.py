@@ -148,6 +148,7 @@ def main():
     ap.add_argument("--notes", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--cache", default="vpo-targets.npz"); ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--resume", help="existing model: skip tone colour + unrest, only room and overall colour")
+    ap.add_argument("--keep-room", action="store_true", help="with --resume: also keep room + release, only overall colour and loudness")
     a = ap.parse_args()
     tmp = tempfile.mkdtemp()
     eng = EngineRunner(a.engine, tmp)
@@ -170,6 +171,11 @@ def main():
             if t and t[0] == "key": curves[int(t[1])] = np.array(list(map(float, t[2:])))
             if t and t[0] == "unrest": unrest = list(map(float, t[1:]))
             if t and t[0] in ("release",): HALL["release"] = float(t[1])
+            if a.keep_room and t:
+                if t[0] == "er": er = float(t[1])
+                if t[0] == "late": late = float(t[1])
+                if t[0] == "hall": HALL["rt60"], HALL["hf"] = float(t[1]), float(t[2])
+                if t[0] in ("erdiff", "spacing"): HALL[t[0]] = float(t[1])
         print("  Klangfarbe + Unruhe übernommen aus", a.resume)
 
     # 1) tone colour, closed loop
@@ -240,38 +246,39 @@ def main():
                         else: HALL[name] = old_v
         return cur["er"], cur["late"], best
 
-    er, late, (c, w, t, co) = room_search(0.6, 0.2)
-    print(f"  Raum: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
-          f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
+    if not a.keep_room:
+        er, late, (c, w, t, co) = room_search(0.6, 0.2)
+        print(f"  Raum: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
+              f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
 
-    # 3b) the release: how the sound dies after the keys are let go (3 bands, 50 ms steps)
-    DEC_BANDS = [butter(4, [lo / (SR / 2), hi / (SR / 2)], "band", output="sos") for lo, hi in ((250, 1000), (1000, 4000), (4000, 10000))]
-    def decay(x):
-        m = x.mean(0); out = []
-        for sos in DEC_BANDS:
-            y = sosfilt(sos, m)
-            ref_e = (y[sus] ** 2).mean() + 1e-20
-            hop = int(0.05 * SR); t0 = int(last * SR)
-            out.append([10 * np.log10((y[t0 + i * hop: t0 + (i + 1) * hop] ** 2).mean() / ref_e + 1e-12) for i in range(44)])
-        return np.array(out)
-    D_ref = decay(ref)
-    valid = D_ref > -55
-    print("  Ziel-Ausklang: −30 dB nach %.0f ms (mittleres Band)" % (50 * np.argmax(D_ref[1] < -30)))
-    best = None
-    for rel in (0.6, 1.0, 1.6, 2.5, 4.0):
-        for rt in (1.2, 1.8, 2.4, 3.0):
-            for hf in (0.35, 0.6):
-                HALL.update(release=rel, rt60=rt, hf=hf)
-                y = eng.render(model_text(curves, unrest, er, late), prog, seed=3, tail=4)
-                c = np.mean(np.abs(decay(y) - D_ref)[valid])
-                if best is None or c < best[0]:
-                    best = (c, rel, rt, hf)
-    c, rel, rt, hf = best
-    HALL.update(release=rel, rt60=rt, hf=hf)
-    print(f"  Ausklang: Spieler ×{rel:.1f}, Hall {rt:.1f} s, Höhen ×{hf:.2f} → Abweichung {c:.1f} dB")
-    er, late, (c, w, t, co) = room_search(er, late, passes=1)
-    print(f"  Raum nachgeeicht: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
-          f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
+        # 3b) the release: how the sound dies after the keys are let go (3 bands, 50 ms steps)
+        DEC_BANDS = [butter(4, [lo / (SR / 2), hi / (SR / 2)], "band", output="sos") for lo, hi in ((250, 1000), (1000, 4000), (4000, 10000))]
+        def decay(x):
+            m = x.mean(0); out = []
+            for sos in DEC_BANDS:
+                y = sosfilt(sos, m)
+                ref_e = (y[sus] ** 2).mean() + 1e-20
+                hop = int(0.05 * SR); t0 = int(last * SR)
+                out.append([10 * np.log10((y[t0 + i * hop: t0 + (i + 1) * hop] ** 2).mean() / ref_e + 1e-12) for i in range(44)])
+            return np.array(out)
+        D_ref = decay(ref)
+        valid = D_ref > -55
+        print("  Ziel-Ausklang: −30 dB nach %.0f ms (mittleres Band)" % (50 * np.argmax(D_ref[1] < -30)))
+        best = None
+        for rel in (0.6, 1.0, 1.6, 2.5, 4.0):
+            for rt in (1.2, 1.8, 2.4, 3.0):
+                for hf in (0.35, 0.6):
+                    HALL.update(release=rel, rt60=rt, hf=hf)
+                    y = eng.render(model_text(curves, unrest, er, late), prog, seed=3, tail=4)
+                    c = np.mean(np.abs(decay(y) - D_ref)[valid])
+                    if best is None or c < best[0]:
+                        best = (c, rel, rt, hf)
+        c, rel, rt, hf = best
+        HALL.update(release=rel, rt60=rt, hf=hf)
+        print(f"  Ausklang: Spieler ×{rel:.1f}, Hall {rt:.1f} s, Höhen ×{hf:.2f} → Abweichung {c:.1f} dB")
+        er, late, (c, w, t, co) = room_search(er, late, passes=1)
+        print(f"  Raum nachgeeicht: frühe Refl. {er:.2f}, Hall {late:.2f}, Raum am Platz {1 - HALL['erdiff']:.2f}, Mikroabstand {HALL['spacing']:.2f}"
+              f" → Breite {w:.2f}, L/R {' / '.join(f'{v:.2f}' for v in co)}, Nachhall {t:.1f} dB")
 
     # 4) overall colour of the complete sound (close + room + hall) against the reference:
     #    one gentle correction shared by all keys, two rounds
