@@ -149,6 +149,7 @@ def main():
     ap.add_argument("--notes", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--cache", default="vpo-targets.npz"); ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--resume", help="existing model: skip tone colour + unrest, only room and overall colour")
+    ap.add_argument("--carry", help="model whose dynamics / bow / body lines are kept (the rest is learned anew)")
     ap.add_argument("--keep-room", action="store_true", help="with --resume: also keep room + release, only overall colour and loudness")
     a = ap.parse_args()
     tmp = tempfile.mkdtemp()
@@ -166,13 +167,17 @@ def main():
         y = eng.render(model_text(curves, unrest, er, late), note(k), seed=seed, dry=True, extra=("--spacing", "0") + tuple(extra))
         return y.mean(0)[int(0.5 * SR): int(3.0 * SR)]
 
+    if a.carry:
+        for line in open(a.carry):
+            t = line.split()
+            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
     if a.resume:
         for line in open(a.resume):
             t = line.split()
             if t and t[0] == "key": curves[int(t[1])] = np.array(list(map(float, t[2:])))
             if t and t[0] == "unrest": unrest = list(map(float, t[1:]))
             if t and t[0] in ("release",): HALL["release"] = float(t[1])
-            if t and t[0] in ("flutter", "harmvar", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
+            if t and t[0] in ("flutter", "harmvar", "rosin", "bodydirect", "dyn", "noisesoft", "dynnode", "dk"): EXTRA.append(line.rstrip("\n"))
             if a.keep_room and t:
                 if t[0] == "er": er = float(t[1])
                 if t[0] == "late": late = float(t[1])

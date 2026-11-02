@@ -478,7 +478,7 @@ struct Engine::Impl {
         float scratch = 0.25f;
         if (ts >= 0) scratch += 1.4f * v.vel * std::exp(-ts / 0.07f);
         if (dc >= 0) scratch += 0.8f * v.vel * std::exp(-dc / 0.05f);
-        noise = p.rosin * scratch * 1.7320508f * keyGain[std::clamp(v.key, kKeyLo, kKeyHi)];
+        noise = p.rosin * model.rosin[pl.reg] * scratch * 1.7320508f * keyGain[std::clamp(v.key, kKeyLo, kKeyHi)];
     }
 
     // ------------------------------------------------------------------ render one 64-sample chunk
