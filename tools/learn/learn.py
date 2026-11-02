@@ -155,7 +155,17 @@ def main():
     tmp = tempfile.mkdtemp()
     eng = EngineRunner(a.engine, tmp)
     recs = target_notes(a.vpo, a.sfizz_render, a.cache)
-    print(f"{len(recs)} Tasten des Sample-Instruments gemessen")
+    # keys the sample library does not cover (silent) are left out and filled from their neighbours
+    valid = [k for k in KEYS if 10 * np.log10(np.mean(recs[k] ** 2) + 1e-30) > -60]
+    missing = [k for k in KEYS if k not in valid]
+    print(f"{len(valid)} Tasten des Sample-Instruments gemessen" + (f", ohne Aufnahme: {missing}" if missing else ""))
+    def fill(cv):
+        for k in missing:
+            lo = max([v for v in valid if v < k], default=None); hi = min([v for v in valid if v > k], default=None)
+            if lo is None: cv[k] = cv[hi].copy()
+            elif hi is None: cv[k] = cv[lo].copy()
+            else: cv[k] = cv[lo] + (k - lo) / (hi - lo) * (cv[hi] - cv[lo])
+        return cv
 
     curves = {k: np.zeros(len(BANDS)) for k in KEYS}
     unrest = [1.5, 1.5, 1.5, 0.5]
@@ -189,7 +199,7 @@ def main():
     for rnd in range(0 if a.resume else a.rounds):
         err = []
         new = {}
-        for k in KEYS:
+        for k in valid:
             f0 = 440 * 2 ** ((k - 69) / 12)
             envs = [harmonic_envelope(mono(k, s), f0) for s in (11, 23, 37, 51)]
             ey = 10 * np.log10(np.mean([10 ** (e / 10) for e in envs], axis=0))
@@ -198,6 +208,7 @@ def main():
             d[~ok] = d[ok][0]
             err.append(np.mean(np.abs(d[ok & (BANDS < 12000)] - np.median(d[ok]))))
             new[k] = curves[k] + d
+        new = fill(new)
         arr = np.array([new[k] for k in KEYS])
         sm = arr.copy(); sm[1:-1] = 0.25 * arr[:-2] + 0.5 * arr[1:-1] + 0.25 * arr[2:]
         mean = np.mean(np.median(sm, axis=1))
@@ -207,7 +218,7 @@ def main():
     # 2) bow-pressure unrest per register
     grid = [0.0, 1.5, 3.0, 4.5]
     for r in range(0 if a.resume else 4):
-        ks = [k for k in KEYS if register(k) == r]
+        ks = [k for k in valid if register(k) == r]
         target = np.mean([shimmer_db(recs[k]) for k in ks])
         probe = [ks[1], ks[len(ks) // 2], ks[-2]]
         meas = []
