@@ -371,6 +371,7 @@ struct Engine::Impl {
         }
         for (int r = 0; r < kNumRegisters; ++r)
             if (r != v.reg && nSec[r] == 1 && w[r] < 0.12f) { nSec[r] = 0; ++nSec[v.reg]; }
+        if (p.solo) { v.nPlayers = 1; for (auto& n : nSec) n = 0; nSec[v.reg] = 1; }
         v.secRate = 4.9f + 0.9f * urand(s);
         v.secPhase = 6.2831853f * urand(s);
         v.noteGain = std::pow(10.f, 1.2f * gauss(s) / 20.f);

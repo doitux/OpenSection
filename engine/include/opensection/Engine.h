@@ -31,6 +31,7 @@ struct Params {
     float gainDb = 0.0f;       // output
     // studio switches (not live)
     bool dryOnly = false;      // no ER / hall (used for learning)
+    bool solo = false;         // one player per note, main section only (used for learning the bodies)
 };
 
 struct Event {

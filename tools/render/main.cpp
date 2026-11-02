@@ -68,7 +68,7 @@ static void writeWav(const char* path, const std::vector<float>& L, const std::v
 int main(int argc, char** argv)
 {
     std::string modelPath; int sr = 48000, block = 128; uint32_t seed = 1;
-    bool dry = false, bench = false; float quality = 1.0f, tail = 4.0f;
+    bool dry = false, bench = false, solo = false; float quality = 1.0f, tail = 4.0f;
     float coupling = -1, detune = -1, rosin = -1, spacing = -1, width = -1;
     float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
@@ -80,6 +80,7 @@ int main(int argc, char** argv)
         else if (a == "--block") block = std::atoi(next());
         else if (a == "--seed") seed = (uint32_t)std::atoi(next());
         else if (a == "--dry") dry = true;
+        else if (a == "--solo") solo = true;
         else if (a == "--bench") bench = true;
         else if (a == "--quality") quality = (float)std::atof(next());
         else if (a == "--tail") tail = (float)std::atof(next());
@@ -106,7 +107,7 @@ int main(int argc, char** argv)
 
     Engine eng(model, seed);
     eng.prepare(sr, block);
-    Params p; p.quality = quality; p.dryOnly = dry;
+    Params p; p.quality = quality; p.dryOnly = dry; p.solo = solo;
     if (coupling >= 0) p.coupling = coupling;
     if (detune >= 0) p.detune = detune;
     if (rosin >= 0) p.rosin = rosin;
