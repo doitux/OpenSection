@@ -57,6 +57,12 @@ int OpenSectionProcessor::getNumPrograms() { return (int)presets().size(); }
 const String OpenSectionProcessor::getProgramName(int i) { return i >= 0 && i < getNumPrograms() ? String::fromUTF8(presets()[(size_t)i].name) : String(); }
 void OpenSectionProcessor::setCurrentProgram(int i)
 {
+    if (i == currentProgram) return;          // hosts re-send the program on load: keep the saved tweaks
+    applyPreset(i);
+}
+
+void OpenSectionProcessor::applyPreset(int i)
+{
     if (i < 0 || i >= getNumPrograms()) return;
     currentProgram = i;
     for (auto* prm : getParameters())
@@ -201,14 +207,17 @@ void OpenSectionProcessor::getStateInformation(MemoryBlock& destData)
 {
     auto state = params.copyState();
     std::unique_ptr<XmlElement> xml(state.createXml());
+    xml->setAttribute("program", currentProgram);
     copyXmlToBinary(*xml, destData);
 }
 
 void OpenSectionProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     std::unique_ptr<XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
-    if (xml && xml->hasTagName(params.state.getType()))
+    if (xml && xml->hasTagName(params.state.getType())) {
+        currentProgram = xml->getIntAttribute("program", 0);
         params.replaceState(ValueTree::fromXml(*xml));
+    }
 }
 
 AudioProcessorEditor* OpenSectionProcessor::createEditor() { return new OpenSectionEditor(*this); }

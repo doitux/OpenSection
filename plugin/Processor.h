@@ -26,6 +26,7 @@ public:
     int getNumPrograms() override;
     int getCurrentProgram() override { return currentProgram; }
     void setCurrentProgram(int) override;
+    void applyPreset(int);                    // from the editor: always applies
     const juce::String getProgramName(int) override;
     void changeProgramName(int, const juce::String&) override {}
 

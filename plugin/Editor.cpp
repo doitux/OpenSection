@@ -82,7 +82,7 @@ OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEd
     setupCombo(hallType, hallLabel, "hallType", "Room", hallAtt);
     for (int i = 0; i < proc.getNumPrograms(); ++i) preset.addItem(proc.getProgramName(i), i + 1);
     preset.setSelectedId(proc.getCurrentProgram() + 1, dontSendNotification);
-    preset.onChange = [this] { if (preset.getSelectedId() > 0) proc.setCurrentProgram(preset.getSelectedId() - 1); };
+    preset.onChange = [this] { if (preset.getSelectedId() > 0) proc.applyPreset(preset.getSelectedId() - 1); };
     addAndMakeVisible(preset);
     presetLabel.setText("Preset", dontSendNotification); presetLabel.setFont(FontOptions(13.f));
     addAndMakeVisible(presetLabel);
