@@ -18,11 +18,11 @@ struct Params {
     float attack = 1.0f;       // 0.3 .. 3   scale of the bow attack time
     float release = 1.0f;      // 0.3 .. 4   scale of the release
     float vibrato = 1.0f;      // 0 .. 2     vibrato depth
-    float unrest = 1.0f;       // 0 .. 2     scale of the learned bow-pressure unrest
+    float unrest = 0.7f;       // 0 .. 2     scale of the learned bow-pressure unrest
     float rosin = 1.0f;        // 0 .. 4     bow noise / scratch (x the learned level per section)
     float velocity = 1.0f;     // 0 .. 1     key velocity -> loudness + faster/harder attack
     float coupling = 0.1f;     // 0 .. 1     how much of the vibrato the section shares
-    float detune = 1.2f;       // 0 .. 4     spread of the players' tuning (x 6 cents; the section stays centred)
+    float detune = 0.8f;       // 0 .. 4     spread of the players' tuning (x 6 cents; the section stays centred)
     float expression = 1.0f;   // 0 .. 1     bow pressure (CC11 by default)
     // microphones / room
     float closeMic = 1.0f;     // 0 .. 2     dry (close) signal

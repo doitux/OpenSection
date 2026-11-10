@@ -7,7 +7,7 @@ OpenSection builds an orchestral string section the way a physical-modelling pia
 every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
 recordings.
 
-> Status: **early development** – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
+> Status: **0.2.1** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
 > standalone; AU on macOS) work. The full user interface (stage view, EQ, hall types, presets) is next.
 
 ## How it works
@@ -44,7 +44,11 @@ recordings.
    as in a real string arrangement.
 9. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
    and an FDN hall in four rooms (concert hall as learned, chamber, church, studio), plus a
-   three-band EQ and factory presets (e.g. "Hinter Klavier" – behind the piano).
+   three-band EQ and factory presets: Standard, String Pad, Warm Strings 1 and 2, Hinter Klavier
+   (behind the piano), Weit & weich, Nah & klar, Fundament, Dämpfer-Fläche, Tremolo, Pizzicato.
+10. **Checked against two references.** The mid register (g to g'') is compared with two sampled
+    sections (VPO and VSCO2-CE). Since 0.2.1 the colour there is within about ±1 dB of both between
+    0.7 and 3.6 kHz – a 2–3 dB bump around 2 kHz (heard as a slightly nasal tone) is gone.
 
 ### Real-time design
 
