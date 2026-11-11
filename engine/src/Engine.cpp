@@ -25,6 +25,8 @@ namespace opensection {
 
 namespace {
 
+constexpr float kPadLevel = 5.0f;               // synth pad level at Pad = 1 (about as loud as the strings in their room)
+constexpr float kPadHall = 1.0f;                // how much of the pad goes into the hall
 constexpr float kNearMix = 0.5f;                // level of the desk-bound room part (both mics summed)
 constexpr int kDesks = 4;                       // desks (body + seat) per register
 constexpr int kBuses = kNumRegisters * kDesks;
@@ -169,6 +171,11 @@ struct Voice {
     // the section listens to itself: part of the vibrato is shared, and every note is a bit different
     float secPhase = 0, secRate = 5.f, noteGain = 1.f, noteTone = 0.f;
     std::array<Player, kMaxPlayers> pl;
+    // synth pad: four slightly detuned soft oscillators (two per side) that drift slowly against each other
+    float padEnv = 0.f, padLpL = 0.f, padLpR = 0.f, padT = 0.f;
+    std::array<double, 4> padPh {};
+    std::array<float, 4> padDet {}, padLfo {}, padRate {};
+    float padFlt = 0.f, padFltRate = 0.07f;
 };
 
 constexpr int kErTaps = 20;
@@ -178,8 +185,8 @@ struct Desk {
     int dDelL = 0, dDelR = 0;                         // arrival time at the left/right mic (spaced pair + row)
     bool back = false;                                // back desk: further away, darker, more room
     float lpA = 1.f, lpL = 0.f, lpR = 0.f, dryGain = 1.f, erScale = 1.f;
-    float mixPan = 0.f, mixDepth = 0.f;
-    float erUnsideL = 1.f, erUnsideR = 1.f;           // undo the room mics' side weighting               // own seat when the sections are mixed through the room
+    float mixPan = 0.f, mixDepth = 0.f;               // own seat when the sections are mixed through the room
+    float erUnsideL = 1.f, erUnsideR = 1.f;           // undo the room mics' side weighting
     std::array<int, kErTaps> erDelL {}, erDelR {};
     std::array<float, kErTaps> erGainL {}, erGainR {};
     std::array<float, kErTaps> erBaseL {}, erBaseR {}; // reflections without the side the desk sits on
@@ -243,6 +250,8 @@ struct Engine::Impl {
 
     std::vector<std::vector<float>> tabs;             // one table set per bow pressure: [key][kTableLen+1]
     std::vector<float> tabQ;                          // bow pressure of each set, ascending
+    std::vector<float> padTab;                        // synth pad wavetable per key: soft, dark, no edges
+    float padL[kChunk], padR[kChunk];
     size_t nVar = 1;                                  // irregular variants per set (tabs[set * nVar + variant])
     std::array<float, 128> keyGain {};                 // table RMS relative to a plain saw
     Wander wDrift, wRate, wSlow, wUnrest, wFlutter;
@@ -328,6 +337,32 @@ struct Engine::Impl {
                 dst[kTableLen] = dst[0];
             }
             keyGain[key] = (float)std::sqrt(eRef) / 0.57735f;            // rosin noise follows the loud colour
+        }
+    }
+
+    // the pad: a soft harmonic series (odd harmonics a little stronger, falling 1/n^1.3) behind a gentle
+    // 12 dB/oct low-pass at 2.5 x f0 (260 Hz .. 1.1 kHz) - round like a filtered synth pad, no buzz
+    void buildPadTables()
+    {
+        const int nKeys = kKeyHi - kKeyLo + 1;
+        padTab.assign((size_t)nKeys * (kTableLen + 1), 0.f);
+        const float fmax = std::min(12000.f, 0.45f * (float)sr / 1.03f);
+        std::vector<double> acc(kTableLen);
+        for (int key = kKeyLo; key <= kKeyHi; ++key) {
+            const float f0 = 440.f * std::pow(2.f, (key - 69) / 12.f);
+            const float fc = std::clamp(2.5f * f0, 260.f, 1100.f);
+            std::fill(acc.begin(), acc.end(), 0.0);
+            for (int h = 1; h * f0 < fmax; ++h) {
+                const float f = h * f0, r = f / fc;
+                const float a = std::pow((float)h, -1.3f) * (h % 2 ? 1.f : 0.7f) / std::sqrt(1.f + r * r * r * r);
+                if (a < 2e-4f) break;
+                for (int i = 0; i < kTableLen; ++i) acc[i] += a * std::sin(2.0 * M_PI * h * i / kTableLen);
+            }
+            double e = 0; for (double x : acc) e += x * x;
+            const float g = (float)(0.7071 / std::sqrt(e / kTableLen + 1e-20));
+            float* t = &padTab[(size_t)(key - kKeyLo) * (kTableLen + 1)];
+            for (int i = 0; i < kTableLen; ++i) t[i] = g * (float)acc[i];
+            t[kTableLen] = t[0];
         }
     }
 
@@ -534,6 +569,14 @@ struct Engine::Impl {
             m /= (float)v.nPlayers;
             for (int i = 0; i < v.nPlayers; ++i) v.pl[i].det -= m;
         }
+        static const float kPadDet[4] = { -7.f, 2.5f, -2.5f, 7.f };     // cents; left: 0 and 1, right: 2 and 3
+        for (int o = 0; o < 4; ++o) {
+            v.padPh[o] = urand(s);
+            v.padDet[o] = kPadDet[o] + 1.5f * gauss(s);
+            v.padLfo[o] = 6.2831853f * urand(s);
+            v.padRate[o] = 0.05f + 0.07f * urand(s);                     // a full drift cycle every 8..20 s
+        }
+        v.padFlt = 6.2831853f * urand(s); v.padFltRate = 0.04f + 0.05f * urand(s);
     }
 
     void noteOff(int key)
@@ -626,10 +669,55 @@ struct Engine::Impl {
     }
 
     // ------------------------------------------------------------------ render one 64-sample chunk
+    // synth pad for one voice: slow swell (follows Attack/Release, slower than the bow), level from
+    // velocity (gently) and the expression pedal, four detuned oscillators beating slowly against
+    // each other, a low-pass that breathes very slowly
+    void renderPad(Voice& v, float chunkDur)
+    {
+        const float target = v.released ? 0.f : 1.f;
+        const float tau = v.released ? 0.75f * p.release : 0.5f * p.attack;
+        const float e0 = v.padEnv;
+        v.padEnv = target + (e0 - target) * std::exp(-chunkDur / std::max(0.02f, tau));
+        if (e0 < 1e-5f && v.padEnv < 1e-5f) return;
+        v.padT += chunkDur;
+        const float f0 = 440.f * std::pow(2.f, (v.key - 69) / 12.f) * bend;
+        const float lvl = kPadLevel * p.pad * std::sqrt(v.vel) * (0.35f + 0.65f * exprSmooth) * (v.stealing ? v.steal : 1.f);
+        const float* t = &padTab[(size_t)(std::clamp(v.key, kKeyLo, kKeyHi) - kKeyLo) * (kTableLen + 1)];
+        double inc[4];
+        for (int o = 0; o < 4; ++o) {
+            v.padLfo[o] += 6.2831853f * v.padRate[o] * chunkDur;
+            const float cents = v.padDet[o] + 3.f * std::sin(v.padLfo[o]);
+            inc[o] = f0 * std::pow(2.f, cents / 1200.f) / sr;
+        }
+        v.padFlt += 6.2831853f * v.padFltRate * chunkDur;
+        const float fc = std::clamp(2.2f * f0, 220.f, 1000.f) * (1.f + 0.25f * std::sin(v.padFlt)) * (0.75f + 0.5f * exprSmooth);
+        const float a = 1.f - std::exp(-2.f * (float)M_PI * std::min(fc, 0.2f * (float)sr) / (float)sr);
+        const float k = 1.f / kChunk, dE = (v.padEnv - e0) * k;
+        float env = e0, lpL = v.padLpL, lpR = v.padLpR;
+        for (int n = 0; n < kChunk; ++n) {
+            env += dE;
+            float o4[4];
+            for (int o = 0; o < 4; ++o) {
+                double& ph = v.padPh[o]; ph += inc[o]; if (ph >= 1.0) ph -= 1.0;
+                const float pos = (float)ph * kTableLen; const int i0 = (int)pos; const float fr = pos - i0;
+                o4[o] = t[i0] + fr * (t[i0 + 1] - t[i0]);
+            }
+            // each side mostly its own pair, a little of the other: wide but mono-safe (no phase tricks)
+            const float l = o4[0] + o4[1] + 0.35f * (o4[2] + o4[3]), r = o4[2] + o4[3] + 0.35f * (o4[0] + o4[1]);
+            lpL += a * (l - lpL); lpR += a * (r - lpR);
+            const float g = lvl * env * env;                     // squared: an even softer start
+            padL[n] += g * lpL; padR[n] += g * lpR;
+        }
+        v.padLpL = lpL; v.padLpR = lpR;
+    }
+
     void renderChunk(float* outL, float* outR)
     {
         for (auto& b : busIn) std::memset(b.data(), 0, sizeof(float) * kChunk);
+        std::memset(padL, 0, sizeof padL); std::memset(padR, 0, sizeof padR);
         exprSmooth += (expression - exprSmooth) * 0.08f;
+        const bool padOn = p.pad > 0.f;
+        if (!padOn) for (auto& v : voices) v.padEnv = 0.f;
         const float chunkDur = kChunk / (float)sr;
         const float hpA = std::exp(-2.f * (float)M_PI * 2000.f / (float)sr);
         for (auto& v : voices) {
@@ -654,7 +742,8 @@ struct Engine::Impl {
             if (v.released) v.rel *= std::exp(-chunkDur / (v.art == 3 ? 0.12f * p.release : 0.22f * releaseScale * p.release));
             if (v.art == 3 && v.t > 9.0 * model.pizzDecay[v.reg]) v.released = true, v.rel = std::min(v.rel, 1e-5f);   // rung out
             if (v.stealing) v.steal *= std::exp(-chunkDur / 0.012f);
-            for (int i = 0; i < v.nPlayers; ++i) {
+            const bool stringsGone = padOn && v.released && v.rel < 1e-4f;    // only the pad still rings
+            for (int i = 0; i < (stringsGone ? 0 : v.nPlayers); ++i) {
                 Player& pl = v.pl[i];
                 float inc1, amp1, mix1, noi1;
                 controls(v, pl, v.t, inc1, amp1, mix1, noi1);
@@ -692,7 +781,8 @@ struct Engine::Impl {
                 pl.inc = inc1; pl.amp = amp1; pl.mix = mix1; pl.noise = noi1;
                 pl.phase = ph; pl.hpX = hpX; pl.hpY = hpY; pl.lpY = lpY; pl.rng = rs;
             }
-            if ((v.released && v.rel < 1e-4f) || (v.stealing && v.steal < 1e-4f)) v.active = false;
+            if (padOn && !v.dbl && v.art != 3) renderPad(v, chunkDur);
+            if ((v.released && v.rel < 1e-4f && v.padEnv < 1e-4f) || (v.stealing && v.steal < 1e-4f)) v.active = false;
         }
 
         // desks: body -> close mics + room mics
@@ -744,7 +834,7 @@ struct Engine::Impl {
         }
         const float g = model.outGain * std::pow(10.f, p.gainDb / 20.f);
         if (p.dryOnly) {
-            for (int n = 0; n < kChunk; ++n) { outL[n] = g * dryL[n]; outR[n] = g * dryR[n]; }
+            for (int n = 0; n < kChunk; ++n) { outL[n] = g * (dryL[n] + padL[n]); outR[n] = g * (dryR[n] + padR[n]); }
             return;
         }
         const int ht = std::clamp(p.hallType, 0, 3);
@@ -754,9 +844,9 @@ struct Engine::Impl {
         for (int n = 0; n < kChunk; ++n) {                     // walls swallow highs
             erLpL += erLpA * (erL[n] - erLpL); erL[n] = erDiffL.process(erLpL);   // dense, not comb-like
             erLpR += erLpA * (erR[n] - erLpR); erR[n] = erDiffR.process(erLpR);
-            late[n] = 0.5f * ((dryL[n] + eg * erL[n]) + (dryR[n] + eg * erR[n]));
-            outL[n] = cg * dryL[n] + eg * erL[n];
-            outR[n] = cg * dryR[n] + eg * erR[n];
+            late[n] = 0.5f * ((dryL[n] + eg * erL[n]) + (dryR[n] + eg * erR[n]) + kPadHall * (padL[n] + padR[n]));
+            outL[n] = cg * dryL[n] + eg * erL[n] + padL[n];
+            outR[n] = cg * dryR[n] + eg * erR[n] + padR[n];
         }
         halls[hallCur].process(late, outL, outR, kChunk, lg);
         if (hallTail > 0) {                                    // the previous room rings out
@@ -788,6 +878,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->unrestDb = d->model.unrest;
     d->erGain = d->model.erGain; d->lateGain = d->model.lateGain;
     d->buildTables();
+    d->buildPadTables();
     d->buildDesks();
     for (int i = 0; i < 4; ++i)
         d->halls[i].prepare(sampleRate, d->model.hallRt60 * kHallType[i].rt, std::min(0.95f, d->model.hallHf * kHallType[i].hf), kHallType[i].pre);

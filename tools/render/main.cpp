@@ -11,7 +11,7 @@
 //          --solo  --vibrato v  --flutter f0,f1,f2,f3   (learning helpers)
 //          --bassdouble level  --halltype 0..3  --eq low,mid,high (dB)
 //          --set id=value   any plugin parameter by its id (attack, release, vibrato, unrest, rosin, velocity,
-//                           detune, width, seating, spacing, close, room, hall, gain, expression, articulation,
+//                           detune, width, seating, pad, spacing, close, room, hall, gain, expression, articulation,
 //                           hallType, bassDouble, eqLow, eqMid, eqHigh) – e.g. to render a factory preset
 #include "opensection/Engine.h"
 #include <algorithm>
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
         const std::string id = kv.substr(0, eq); const float v = (float)std::atof(kv.c_str() + eq + 1);
         if (id == "attack") p.attack = v; else if (id == "release") p.release = v; else if (id == "vibrato") p.vibrato = v;
         else if (id == "unrest") p.unrest = v; else if (id == "rosin") p.rosin = v; else if (id == "velocity") p.velocity = v;
-        else if (id == "detune") p.detune = v; else if (id == "width") p.width = v; else if (id == "seating") p.seating = v; else if (id == "spacing") p.spacing = v;
+        else if (id == "detune") p.detune = v; else if (id == "width") p.width = v; else if (id == "seating") p.seating = v; else if (id == "pad") p.pad = v; else if (id == "spacing") p.spacing = v;
         else if (id == "close") p.closeMic = v; else if (id == "room") p.roomMic = v; else if (id == "hall") p.hall = v;
         else if (id == "gain") p.gainDb = v; else if (id == "expression") p.expression = v;
         else if (id == "articulation") p.articulation = (int)v; else if (id == "hallType") p.hallType = (int)v;

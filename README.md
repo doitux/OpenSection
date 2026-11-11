@@ -7,7 +7,7 @@ OpenSection builds an orchestral string section the way a physical-modelling pia
 every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
 recordings.
 
-> Status: **0.2.2** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
+> Status: **0.2.3** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
 > standalone; AU on macOS) work. The full user interface (stage view, EQ, hall types, presets) is next.
 
 ## How it works
@@ -53,7 +53,13 @@ recordings.
     width and in each row). The sound then comes from everywhere – real sources in a room, no
     chorus. Mono-safe: the mono sum stays as even as before (±0.5 dB). Since 0.2.2 the room
     reflections and the hall are also balanced left/right (both leaned slightly to the left).
-11. **Checked against two references.** The mid register (g to g'') is compared with two sampled
+11. **String Pad.** The one preset that is not only strings: a soft synth pad sits underneath –
+    a round harmonic series behind a gentle low-pass at 2.5 × f0 (260 Hz – 1.1 kHz), four
+    oscillators detuned by a few cents that drift slowly against each other (the slow "wabern"),
+    a low-pass that breathes every 10–25 s, a slower swell than the bow and a longer release. Level
+    follows velocity gently and the expression pedal. *Synth pad* knob (TONE); 0 in every other
+    preset – then it is not computed and those sounds are bit-identical to before.
+12. **Checked against two references.** The mid register (g to g'') is compared with two sampled
     sections (VPO and VSCO2-CE). Since 0.2.1 the colour there is within about ±1 dB of both between
     0.7 and 3.6 kHz – a 2–3 dB bump around 2 kHz (heard as a slightly nasal tone) is gone.
 
