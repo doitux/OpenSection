@@ -25,6 +25,7 @@ namespace opensection {
 
 namespace {
 
+constexpr float kNearMix = 0.5f;                // level of the desk-bound room part (both mics summed)
 constexpr int kDesks = 4;                       // desks (body + seat) per register
 constexpr int kBuses = kNumRegisters * kDesks;
 constexpr int kMaxVoices = 56;                // 48 playing + 8 spare slots for click-free stealing
@@ -177,8 +178,11 @@ struct Desk {
     int dDelL = 0, dDelR = 0;                         // arrival time at the left/right mic (spaced pair + row)
     bool back = false;                                // back desk: further away, darker, more room
     float lpA = 1.f, lpL = 0.f, lpR = 0.f, dryGain = 1.f, erScale = 1.f;
+    float mixPan = 0.f, mixDepth = 0.f;
+    float erUnsideL = 1.f, erUnsideR = 1.f;           // undo the room mics' side weighting               // own seat when the sections are mixed through the room
     std::array<int, kErTaps> erDelL {}, erDelR {};
     std::array<float, kErTaps> erGainL {}, erGainR {};
+    std::array<float, kErTaps> erBaseL {}, erBaseR {}; // reflections without the side the desk sits on
     std::vector<float> ring;                          // body output history for reflections
     int ringPos = 0, ringMask = 0;
     bool active = false;
@@ -337,22 +341,50 @@ struct Engine::Impl {
                 Desk& d = desks[r * kDesks + k];
                 d.body.setIR(makeBody(kReg[r].bodyScale * (1.f + model.bodySpread * (2.f * U(rng) - 1.f)), model.bodyDirect[r], rng, sr));
                 d.ring.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
-                const float pan = std::clamp(kReg[r].seat + (k - 1.5f) / 1.5f * 0.75f, -1.f, 1.f);
                 d.back = (k % 2) == 1;                                   // every second desk sits further back
-                d.lpA = d.back ? 1.f - std::exp(-2.f * (float)M_PI * 6500.f / (float)sr) : 1.f;
-                d.dryGain = d.back ? 0.75f : 1.f;
-                d.erScale = d.back ? 1.6f : 1.f;
                 for (int c = 0; c < 2; ++c) {
-                    const float near = 1.f + 0.5f * (c == 1 ? pan : -pan);
                     for (int t = 0; t < kErTaps; ++t) {
                         const float dl = 0.004f + 0.086f * U(rng) * U(rng) + 0.01f * U(rng);   // denser early, sparser late
-                        const float g = near * (0.3f + 0.4f * U(rng)) * (U(rng) < 0.5f ? -1.f : 1.f) * std::exp(-dl / 0.035f);
+                        const float g = (0.3f + 0.4f * U(rng)) * (U(rng) < 0.5f ? -1.f : 1.f) * std::exp(-dl / 0.035f);
                         (c == 0 ? d.erDelL : d.erDelR)[t] = (int)(dl * sr);
-                        (c == 0 ? d.erGainL : d.erGainR)[t] = g;
+                        (c == 0 ? d.erBaseL : d.erBaseR)[t] = g;
                     }
+                }
+                {   // the random taps must not lean to one side: same energy left and right (the side the desk
+                    // sits on is added in updatePans)
+                    float eL = 0, eR = 0;
+                    for (int t = 0; t < kErTaps; ++t) { eL += d.erBaseL[t] * d.erBaseL[t]; eR += d.erBaseR[t] * d.erBaseR[t]; }
+                    const float m = std::sqrt(0.5f * (eL + eR));
+                    for (int t = 0; t < kErTaps; ++t) { d.erBaseL[t] *= m / std::sqrt(eL); d.erBaseR[t] *= m / std::sqrt(eR); }
                 }
             }
         }
+        // mixed seating: every desk gets its own place anywhere in the room. Stratified: each section has
+        // one desk in every quarter of the width and one in every depth row, so a section is spread over
+        // the whole room instead of landing by chance on one side; all 16 places are different.
+        std::mt19937 srng(seed * 104729u + 7u);
+        auto perm4 = [&] { std::array<int, kDesks> a { 0, 1, 2, 3 }; std::shuffle(a.begin(), a.end(), srng); return a; };
+        std::array<std::array<int, kDesks>, kNumRegisters> qx, qy;       // section -> desk -> quarter / row
+        std::array<std::array<int, kNumRegisters>, kDesks> sx, sy;       // quarter -> section -> slot inside it
+        for (int r = 0; r < kNumRegisters; ++r) {
+            qx[r] = perm4();
+            // balance: of the two desks in the left half one sits in front (rows 0/1) and one behind (rows
+            // 2/3), the same on the right - otherwise the louder front desks could pull a section to one side
+            const bool fl = srng() & 1u, bl = srng() & 1u;
+            for (int k = 0; k < kDesks; ++k) {
+                const bool left = qx[r][k] < 2, first = (qx[r][k] % 2) == 0;
+                const bool front = first == (left ? fl : !fl);
+                qy[r][k] = front ? ((left == bl) ? 0 : 1) : ((left == bl) ? 2 : 3);
+            }
+        }
+        for (int q = 0; q < kDesks; ++q) { sx[q] = perm4(); sy[q] = perm4(); }
+        for (int r = 0; r < kNumRegisters; ++r)
+            for (int k = 0; k < kDesks; ++k) {
+                Desk& d = desks[r * kDesks + k];
+                const int slotX = qx[r][k] * kNumRegisters + sx[qx[r][k]][r], slotY = qy[r][k] * kNumRegisters + sy[qy[r][k]][r];
+                d.mixPan = -0.95f + 1.9f * (slotX + 0.5f) / kBuses;
+                d.mixDepth = 1.25f * (slotY + 0.5f) / kBuses;   // front row .. a bit behind the back desks
+            }
         updatePans();
     }
 
@@ -361,13 +393,31 @@ struct Engine::Impl {
         for (int r = 0; r < kNumRegisters; ++r)
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
-                const float pan = std::clamp(kReg[r].seat * std::min(1.f, p.width) + (k - 1.5f) / 1.5f * 0.75f * p.width, -1.f, 1.f);
+                // seating: below 0.5 every section closes up into a tight block around its seat (a group of
+                // about 3 m instead of the whole stage width), above 0.5 the desks move to their own places
+                // anywhere in the room - left, right, front, back - whatever section they belong to
+                const float s = std::clamp(p.seating, 0.f, 1.f);
+                const float spreadK = s < 0.5f ? 0.12f + (0.75f - 0.12f) * (s / 0.5f) : 0.75f;
+                const float m = s > 0.5f ? (s - 0.5f) / 0.5f : 0.f;
+                const float orch = kReg[r].seat * std::min(1.f, p.width) + (k - 1.5f) / 1.5f * spreadK * p.width;
+                const float pan = std::clamp(orch + m * (d.mixPan * p.width - orch), -1.f, 1.f);
+                // distance: 0 front row, 1 the back desk of the orchestra layout (7 ms later, -2.5 dB, darker,
+                // more room), up to 1.25 when mixed
+                const float depth = (d.back ? 1.f : 0.f) + m * (d.mixDepth - (d.back ? 1.f : 0.f));
+                d.dryGain = 1.f - 0.25f * depth;
+                d.erScale = 1.f + 0.6f * depth;
+                d.lpA = depth > 0.f ? 1.f - std::exp(-2.f * (float)M_PI * std::max(3500.f, 20000.f * std::pow(0.325f, depth)) / (float)sr) : 1.f;
+                for (int t = 0; t < kErTaps; ++t) {                     // the room mic on the desk's side hears it louder
+                    d.erGainL[t] = (1.f - 0.5f * pan) * d.erBaseL[t];
+                    d.erGainR[t] = (1.f + 0.5f * pan) * d.erBaseR[t];
+                }
+                d.erUnsideL = 1.f / (1.f - 0.5f * pan); d.erUnsideR = 1.f / (1.f + 0.5f * pan);
                 // mild level panning + time difference like a spaced microphone pair (up to ~1.1 ms),
                 // back desks arrive a little later: separate sources in a room, not phantom speakers
                 const float lvl = 0.6f * pan;
                 d.panL = std::cos((lvl + 1.f) * (float)M_PI / 4.f) * d.dryGain;
                 d.panR = std::sin((lvl + 1.f) * (float)M_PI / 4.f) * d.dryGain;
-                const float itd = 0.0011f * model.spacing * p.spacing * (float)sr, row = (d.back ? 0.007f : 0.f) * (float)sr;
+                const float itd = 0.0011f * model.spacing * p.spacing * (float)sr, row = 0.007f * depth * (float)sr;
                 d.dDelL = (int)(row + itd * std::max(pan, 0.f));
                 d.dDelR = (int)(row + itd * std::max(-pan, 0.f));
             }
@@ -684,8 +734,11 @@ struct Engine::Impl {
                 }
                 // part of the room stays with the desk (the player sits *in* the room), part is spread wide
                 const float c = (1.f - erDiff) * 1.41421356f;
-                erL[n] += d.erScale * (c * d.panL * l + erDiff * l);
-                erR[n] += d.erScale * (c * d.panR * l + erDiff * r);
+                // (the part that stays with the desk is taken from both room mics: taken from the left one
+                // only, it added up with the left channel's own reflections and the room leaned left)
+                const float near = kNearMix * (l * d.erUnsideL + r * d.erUnsideR);
+                erL[n] += d.erScale * (c * d.panL * near + erDiff * l);
+                erR[n] += d.erScale * (c * d.panR * near + erDiff * r);
                 d.ringPos = (d.ringPos + 1) & d.ringMask;
             }
         }
@@ -751,7 +804,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
 
 void Engine::setParams(const Params& p)
 {
-    const bool widthChanged = p.width != d->p.width || p.spacing != d->p.spacing;
+    const bool widthChanged = p.width != d->p.width || p.spacing != d->p.spacing || p.seating != d->p.seating;
     d->p = p;
     if (widthChanged) d->updatePans();
     d->updateEq();

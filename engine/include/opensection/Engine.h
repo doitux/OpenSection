@@ -13,6 +13,7 @@ struct Params {
     // ensemble
     float quality = 0.7f;      // 0.3 (eco) .. 1.0 (studio): players per note
     float width = 1.0f;        // 0 .. 1.5   stereo spread of the desks
+    float seating = 0.5f;      // 0 .. 1     0 each section a tight block, 0.5 orchestra layout, 1 desks mixed through the room
     float spacing = 1.0f;      // 0 .. 2     distance of the two main mics (time differences)
     // bowing
     float attack = 1.0f;       // 0.3 .. 3   scale of the bow attack time

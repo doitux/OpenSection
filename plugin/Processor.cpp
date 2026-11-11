@@ -8,6 +8,7 @@ using APVTS = AudioProcessorValueTreeState;
 namespace ids {
 static const char* quality = "quality";
 static const char* width = "width";
+static const char* seating = "seating";
 static const char* attack = "attack";
 static const char* release = "release";
 static const char* vibrato = "vibrato";
@@ -40,14 +41,17 @@ static const std::vector<Preset>& presets()
         { "String Pad", { { ids::attack, 2.2f }, { ids::release, 2.2f }, { ids::width, 1.3f }, { ids::closeMic, 0.7f },
                           { ids::roomMic, 1.2f }, { ids::hall, 1.4f }, { ids::rosin, 0.4f }, { ids::vibrato, 0.75f },
                           { ids::unrest, 0.5f }, { ids::detune, 0.7f }, { ids::velocity, 0.4f }, { ids::eqLow, -1.5f },
-                          { ids::eqHigh, -2.f }, { ids::gain, -5.5f } } },
+                          { ids::eqHigh, -2.f }, { ids::seating, 0.85f }, { ids::gain, -5.5f } } },
         { "Warm Strings 1", { { ids::attack, 1.3f }, { ids::release, 1.4f }, { ids::roomMic, 1.1f }, { ids::hall, 1.1f },
                               { ids::rosin, 0.6f }, { ids::vibrato, 0.9f }, { ids::eqLow, 1.f }, { ids::eqMid, -1.f },
-                              { ids::eqHigh, -2.5f }, { ids::velocity, 0.8f }, { ids::gain, -2.5f } } },
+                              { ids::eqHigh, -2.5f }, { ids::velocity, 0.8f }, { ids::seating, 0.7f }, { ids::gain, -2.5f } } },
         { "Warm Strings 2", { { ids::attack, 1.6f }, { ids::release, 1.8f }, { ids::width, 1.2f }, { ids::closeMic, 0.85f },
                               { ids::roomMic, 1.2f }, { ids::hall, 1.3f }, { ids::rosin, 0.4f }, { ids::vibrato, 0.85f },
                               { ids::eqLow, 2.f }, { ids::eqMid, -2.f }, { ids::eqHigh, -4.f }, { ids::bassDouble, 0.4f },
-                              { ids::velocity, 0.7f }, { ids::gain, -3.f } } },
+                              { ids::velocity, 0.7f }, { ids::seating, 0.9f }, { ids::gain, -4.f } } },
+        // the opposite: every section a tight group in its place, close and focused
+        { "Ensemble", { { ids::seating, 0.1f }, { ids::width, 0.9f }, { ids::closeMic, 1.2f }, { ids::roomMic, 0.85f },
+                        { ids::hall, 0.8f }, { ids::gain, -5.f } } },
         { "Hinter Klavier", { { ids::attack, 1.4f }, { ids::release, 1.3f }, { ids::closeMic, 0.8f }, { ids::roomMic, 1.1f },
                               { ids::eqLow, -2.5f }, { ids::eqMid, -1.5f }, { ids::eqHigh, -1.f }, { ids::velocity, 0.7f },
                               { ids::vibrato, 0.9f }, { ids::gain, -8.f } } },
@@ -100,6 +104,8 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::quality, 1 }, "Quality",
                                                        StringArray { "Eco", "Normal", "Studio" }, 1));
     add(ids::width, "Width", 0.f, 1.5f, 1.f);
+    add(ids::seating, "Seating", 0.f, 1.f, 0.5f, -1, [](float v, int) {
+        return String(v < 0.2f ? "Block" : v < 0.4f ? "Close" : v <= 0.6f ? "Orchestra" : v < 0.8f ? "Loose" : "Mixed"); });
     add(ids::attack, "Bow attack", 0.3f, 3.f, 1.f, 1.f);
     add(ids::release, "Release", 0.3f, 4.f, 1.f, 1.f);
     add(ids::vibrato, "Vibrato", 0.f, 2.f, 1.f);
@@ -154,6 +160,7 @@ opensection::Params OpenSectionProcessor::readParams() const
     const int q = (int)v(ids::quality);
     p.quality = q == 0 ? 0.4f : q == 1 ? 0.7f : 1.0f;
     p.width = v(ids::width);
+    p.seating = v(ids::seating);
     p.attack = v(ids::attack);
     p.release = v(ids::release);
     p.vibrato = v(ids::vibrato);

@@ -65,10 +65,13 @@ public:
         // normalise: energy of the impulse response ~ 1 (measured once)
         norm_ = 1.f;
         clear();
-        double e = 0; float l, r;
+        double eL = 0, eR = 0; float l, r;
         const int n = (int)(rt60 * 1.2 * sr);
-        for (int i = 0; i < n; ++i) { float x = i == 0 ? 1.f : 0.f; l = r = 0.f; tick(x, l, r); e += 0.5 * ((double)l * l + (double)r * r); }
-        norm_ = (float)(1.0 / std::sqrt(e + 1e-20));
+        for (int i = 0; i < n; ++i) { float x = i == 0 ? 1.f : 0.f; l = r = 0.f; tick(x, l, r); eL += (double)l * l; eR += (double)r * r; }
+        // the same energy on both sides (the two halves of the delay lines decay a little differently,
+        // which made the hall lean to the left)
+        norm_ = (float)(1.0 / std::sqrt(0.5 * (eL + eR) + 1e-20));
+        normL_ = (float)std::sqrt(0.5 * (eL + eR) / (eL + 1e-20)); normR_ = (float)std::sqrt(0.5 * (eL + eR) / (eR + 1e-20));
         clear();
     }
 
@@ -86,8 +89,8 @@ public:
         for (int s = 0; s < n; ++s) {
             float l = 0, r = 0;
             tick(in[s], l, r);
-            outL[s] += gain * norm_ * l;
-            outR[s] += gain * norm_ * r;
+            outL[s] += gain * norm_ * normL_ * l;
+            outR[s] += gain * norm_ * normR_ * r;
         }
     }
 
@@ -131,7 +134,7 @@ private:
     std::array<int, N> mask_ {}, wpos_ {};
     std::array<float, N> len_ {}, g_ {}, damp_ {}, lp_ {}, rc_ {}, rs_ {}, mc_ {}, ms_ {};
     int renorm_ = 0;
-    float modDepth_ = 10.f, norm_ = 1.f;
+    float modDepth_ = 10.f, norm_ = 1.f, normL_ = 1.f, normR_ = 1.f;
     Diffuser inDiff_;
     std::vector<float> pre_;
     int prePos_ = 0;

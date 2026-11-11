@@ -61,7 +61,7 @@ OpenSectionEditor::Knob& OpenSectionEditor::knob(const char* id, const char* tex
 OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEditor(p), proc(p)
 {
     setLookAndFeel(&look);
-    groups.push_back({ "PLAYING", { &knob("velocity", "Velocity"), &knob("width", "Width"), &knob("bassDouble", "Bass double") } });
+    groups.push_back({ "PLAYING", { &knob("velocity", "Velocity"), &knob("width", "Width"), &knob("seating", "Seating"), &knob("bassDouble", "Bass double") } });
     groups.push_back({ "BOWING", { &knob("attack", "Attack"), &knob("release", "Release"), &knob("vibrato", "Vibrato"),
                                    &knob("unrest", "Unrest"), &knob("rosin", "Rosin"), &knob("detune", "Intonation") } });
     groups.push_back({ "MICROPHONES", { &knob("close", "Close"), &knob("spacing", "Spacing"), &knob("room", "Room"), &knob("hall", "Hall") } });
