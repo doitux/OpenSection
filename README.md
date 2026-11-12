@@ -7,7 +7,7 @@ OpenSection builds an orchestral string section the way a physical-modelling pia
 every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
 recordings.
 
-> Status: **0.2.3** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
+> Status: **0.2.4** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
 > standalone; AU on macOS) work. The full user interface (stage view, EQ, hall types, presets) is next.
 
 ## How it works
@@ -44,7 +44,8 @@ recordings.
    as in a real string arrangement.
 9. **Room.** Close mics, room mics with per-desk early reflections (decorrelated left/right),
    and an FDN hall in four rooms (concert hall as learned, chamber, church, studio), plus a
-   three-band EQ and factory presets: Standard, String Pad, Warm Strings 1 and 2, Ensemble, Hinter Klavier
+   three-band EQ (Low: shelf at 200 Hz, Mid: bell at 1.4 kHz, High: shelf from 5 kHz) and factory
+   presets: Standard, String Pad, Warm Strings 1 and 2, Mellow Strings, Soft Strings, Ensemble, Hinter Klavier
    (behind the piano), Weit & weich, Nah & klar, Fundament, Dämpfer-Fläche, Tremolo, Pizzicato.
 10. **Seating.** One knob decides how the players sit: *Block* – every section a tight group in its
     place (a few metres wide, like an ensemble patch), *Orchestra* – the classic layout (default),
@@ -58,8 +59,17 @@ recordings.
     oscillators detuned by a few cents that drift slowly against each other (the slow "wabern"),
     a low-pass that breathes every 10–25 s, a slower swell than the bow and a longer release. Level
     follows velocity gently and the expression pedal. *Synth pad* knob (TONE); 0 in every other
-    preset – then it is not computed and those sounds are bit-identical to before.
-12. **Checked against two references.** The mid register (g to g'') is compared with two sampled
+    preset – then it is not computed.
+12. **Voicing.** *Natural* is the colour of the recorded sections the model learned from; *Warm* is
+    the long-term colour of warm keyboard string patches: full low mids (+6–7 dB around 125–180 Hz),
+    the honky/nasal 0.5–1.8 kHz region a few dB back, a gentle top. Measured on the same notes
+    against recordings of such patches (only average spectra, no audio is used) and drawn as a smooth
+    curve of 12 gentle bells; default 70 %. The warm presets use 100 %.
+13. **Stand partners.** Every desk has two instruments (two bodies); the left close mic is a little
+    nearer to one, the right to the other. Wide like a stereo recording (left/right correlation
+    about 0.15 instead of 0.4–0.5), and mono-safe: the sum is unchanged. Each room mic keeps its own
+    reflections, the room's bass stays in the middle.
+14. **Checked against two references.** The mid register (g to g'') is compared with two sampled
     sections (VPO and VSCO2-CE). Since 0.2.1 the colour there is within about ±1 dB of both between
     0.7 and 3.6 kHz – a 2–3 dB bump around 2 kHz (heard as a slightly nasal tone) is gone.
 

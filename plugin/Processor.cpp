@@ -10,6 +10,7 @@ static const char* quality = "quality";
 static const char* width = "width";
 static const char* seating = "seating";
 static const char* pad = "pad";
+static const char* voicing = "voicing";
 static const char* attack = "attack";
 static const char* release = "release";
 static const char* vibrato = "vibrato";
@@ -37,35 +38,46 @@ struct Preset { const char* name; std::vector<std::pair<const char*, float>> val
 static const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
+        // Voicing: 0 natural (the colour of the recorded sections), 1 warm (full low mids, no nasal 2.5-4 kHz,
+        // a softer top - like warm keyboard string patches). Default 0.7.
         { "Standard", {} },
         // pads that are needed all the time: slow, wide, calm, out of the way of the bass. Only String Pad
         // has the synth pad underneath - everywhere else it is 0 (off, not even computed)
-        { "String Pad", { { ids::pad, 1.0f }, { ids::attack, 2.6f }, { ids::release, 2.6f }, { ids::width, 1.3f },
+        { "String Pad", { { ids::voicing, 1.f }, { ids::pad, 1.0f }, { ids::attack, 2.6f }, { ids::release, 2.6f }, { ids::width, 1.3f },
                           { ids::closeMic, 0.5f }, { ids::roomMic, 0.9f }, { ids::hall, 1.4f }, { ids::rosin, 0.25f },
                           { ids::vibrato, 0.6f }, { ids::unrest, 0.4f }, { ids::detune, 0.7f }, { ids::velocity, 0.3f },
-                          { ids::eqLow, -1.f }, { ids::eqMid, -3.f }, { ids::eqHigh, -6.f }, { ids::seating, 0.85f },
-                          { ids::gain, -4.5f } } },
-        { "Warm Strings 1", { { ids::attack, 1.3f }, { ids::release, 1.4f }, { ids::roomMic, 1.1f }, { ids::hall, 1.1f },
-                              { ids::rosin, 0.6f }, { ids::vibrato, 0.9f }, { ids::eqLow, 1.f }, { ids::eqMid, -1.f },
-                              { ids::eqHigh, -2.5f }, { ids::velocity, 0.8f }, { ids::seating, 0.7f }, { ids::gain, -2.5f } } },
-        { "Warm Strings 2", { { ids::attack, 1.6f }, { ids::release, 1.8f }, { ids::width, 1.2f }, { ids::closeMic, 0.85f },
+                          { ids::eqLow, -5.0f }, { ids::eqMid, -2.0f }, { ids::eqHigh, -14.0f }, { ids::seating, 0.85f },
+                          { ids::gain, -5.0f } } },
+        { "Warm Strings 1", { { ids::voicing, 1.f }, { ids::attack, 1.3f }, { ids::release, 1.4f }, { ids::roomMic, 1.1f }, { ids::hall, 1.1f },
+                              { ids::rosin, 0.6f }, { ids::vibrato, 0.9f }, { ids::eqLow, 2.0f }, { ids::eqMid, 0.0f },
+                              { ids::velocity, 0.8f }, { ids::seating, 0.7f }, { ids::gain, -4.5f } } },
+        { "Warm Strings 2", { { ids::voicing, 1.f }, { ids::attack, 1.6f }, { ids::release, 1.8f }, { ids::width, 1.2f }, { ids::closeMic, 0.85f },
                               { ids::roomMic, 1.2f }, { ids::hall, 1.3f }, { ids::rosin, 0.4f }, { ids::vibrato, 0.85f },
-                              { ids::eqLow, 2.f }, { ids::eqMid, -2.f }, { ids::eqHigh, -4.f }, { ids::bassDouble, 0.4f },
-                              { ids::velocity, 0.7f }, { ids::seating, 0.9f }, { ids::gain, -4.f } } },
+                              { ids::eqLow, -2.0f }, { ids::eqMid, 0.0f }, { ids::bassDouble, 0.4f },
+                              { ids::velocity, 0.7f }, { ids::seating, 0.9f }, { ids::eqHigh, -2.0f }, { ids::gain, -4.3f } } },
+        // soft, full and wide; and even softer and darker (with mutes)
+        { "Mellow Strings", { { ids::voicing, 1.f }, { ids::attack, 1.4f }, { ids::release, 1.8f }, { ids::width, 1.25f }, { ids::closeMic, 0.8f },
+                              { ids::roomMic, 1.15f }, { ids::hall, 1.25f }, { ids::rosin, 0.4f }, { ids::vibrato, 0.8f },
+                              { ids::eqLow, 0.0f }, { ids::eqMid, 0.0f }, { ids::eqHigh, -12.0f }, { ids::velocity, 0.7f },
+                              { ids::seating, 0.8f }, { ids::gain, -4.3f } } },
+        { "Soft Strings", { { ids::voicing, 1.f }, { ids::articulation, 1.f }, { ids::attack, 1.8f }, { ids::release, 2.0f }, { ids::width, 1.3f }, { ids::closeMic, 0.7f },
+                            { ids::roomMic, 1.1f }, { ids::hall, 1.35f }, { ids::rosin, 0.2f }, { ids::vibrato, 0.7f }, { ids::unrest, 0.5f },
+                            { ids::eqLow, 0.0f }, { ids::eqMid, 0.0f }, { ids::eqHigh, -14.0f }, { ids::velocity, 0.5f },
+                            { ids::seating, 0.85f }, { ids::gain, -4.1f } } },
         // the opposite: every section a tight group in its place, close and focused
         { "Ensemble", { { ids::seating, 0.1f }, { ids::width, 0.9f }, { ids::closeMic, 1.2f }, { ids::roomMic, 0.85f },
-                        { ids::hall, 0.8f }, { ids::gain, -5.f } } },
+                        { ids::hall, 0.8f }, { ids::gain, -5.2f } } },
         { "Hinter Klavier", { { ids::attack, 1.4f }, { ids::release, 1.3f }, { ids::closeMic, 0.8f }, { ids::roomMic, 1.1f },
-                              { ids::eqLow, -2.5f }, { ids::eqMid, -1.5f }, { ids::eqHigh, -1.f }, { ids::velocity, 0.7f },
+                              { ids::eqLow, -3.f }, { ids::eqMid, -1.5f }, { ids::eqHigh, -1.f }, { ids::velocity, 0.7f },
                               { ids::vibrato, 0.9f }, { ids::gain, -8.f } } },
-        { "Weit & weich", { { ids::attack, 1.8f }, { ids::release, 1.8f }, { ids::width, 1.35f }, { ids::closeMic, 0.6f },
+        { "Weit & weich", { { ids::voicing, 0.8f }, { ids::attack, 1.8f }, { ids::release, 1.8f }, { ids::width, 1.35f }, { ids::closeMic, 0.6f },
                             { ids::roomMic, 1.3f }, { ids::hall, 1.4f }, { ids::hallType, 2.f }, { ids::eqHigh, -3.f },
                             { ids::vibrato, 0.8f }, { ids::rosin, 0.6f }, { ids::gain, -7.f } } },
-        { "Nah & klar", { { ids::attack, 0.8f }, { ids::release, 0.8f }, { ids::closeMic, 1.3f }, { ids::roomMic, 0.7f },
-                          { ids::hall, 0.6f }, { ids::hallType, 1.f }, { ids::eqHigh, 1.5f }, { ids::spacing, 0.8f } } },
-        { "Fundament", { { ids::bassDouble, 0.8f }, { ids::eqLow, 2.f }, { ids::release, 1.2f }, { ids::gain, -7.f } } },
+        { "Nah & klar", { { ids::voicing, 0.3f }, { ids::attack, 0.8f }, { ids::release, 0.8f }, { ids::closeMic, 1.3f }, { ids::roomMic, 0.7f },
+                          { ids::hall, 0.6f }, { ids::hallType, 1.f }, { ids::eqHigh, 1.5f }, { ids::spacing, 0.8f }, { ids::gain, -5.5f } } },
+        { "Fundament", { { ids::bassDouble, 0.8f }, { ids::release, 1.2f }, { ids::gain, -6.7f } } },
         { "Dämpfer-Fläche", { { ids::articulation, 1.f }, { ids::attack, 1.6f }, { ids::release, 1.5f }, { ids::hall, 1.3f },
-                              { ids::vibrato, 0.85f }, { ids::gain, -4.f } } },
+                              { ids::vibrato, 0.85f }, { ids::gain, -4.4f } } },
         { "Tremolo", { { ids::articulation, 2.f }, { ids::attack, 0.7f }, { ids::hall, 1.2f } } },
         { "Pizzicato", { { ids::articulation, 3.f }, { ids::roomMic, 1.2f }, { ids::hall, 1.2f } } },
     };
@@ -107,6 +119,8 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::quality, 1 }, "Quality",
                                                        StringArray { "Eco", "Normal", "Studio" }, 1));
     add(ids::width, "Width", 0.f, 1.5f, 1.f);
+    add(ids::voicing, "Voicing", 0.f, 1.f, 0.7f, -1, [](float v, int) {
+        return v < 0.05f ? String("Natural") : v > 0.95f ? String("Warm") : String(juce::roundToInt(v * 100.f)) + " % warm"; });
     add(ids::pad, "Synth pad", 0.f, 1.f, 0.f);
     add(ids::seating, "Seating", 0.f, 1.f, 0.5f, -1, [](float v, int) {
         return String(v < 0.2f ? "Block" : v < 0.4f ? "Close" : v <= 0.6f ? "Orchestra" : v < 0.8f ? "Loose" : "Mixed"); });
@@ -133,7 +147,7 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
     auto db = [](float v, int) { return (v > 0 ? "+" : "") + String(v, 1) + " dB"; };
     add(ids::eqLow, "EQ low", -12.f, 12.f, 0.f, -1, db);
     add(ids::eqMid, "EQ mid", -12.f, 12.f, 0.f, -1, db);
-    add(ids::eqHigh, "EQ high", -12.f, 12.f, 0.f, -1, db);
+    add(ids::eqHigh, "EQ high", -18.f, 12.f, 0.f, -1, db);
     return { p.begin(), p.end() };
 }
 
@@ -166,6 +180,7 @@ opensection::Params OpenSectionProcessor::readParams() const
     p.width = v(ids::width);
     p.seating = v(ids::seating);
     p.pad = v(ids::pad);
+    p.voicing = v(ids::voicing);
     p.attack = v(ids::attack);
     p.release = v(ids::release);
     p.vibrato = v(ids::vibrato);
@@ -241,6 +256,7 @@ void OpenSectionProcessor::setStateInformation(const void* data, int sizeInBytes
     std::unique_ptr<XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
     if (xml && xml->hasTagName(params.state.getType())) {
         // by name (0.2.1+); older states only have the index into the 0.2.0 list
+        // (0.2.4 renames nothing; Mellow/Soft Strings are new)
         static const char* list020[] = { "Standard", "Hinter Klavier", "Weit & weich", "Nah & klar", "Fundament",
                                           "Dämpfer-Fläche", "Tremolo", "Pizzicato" };
         String name = xml->getStringAttribute("programName");

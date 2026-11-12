@@ -27,7 +27,14 @@ namespace {
 
 constexpr float kPadLevel = 5.0f;               // synth pad level at Pad = 1 (about as loud as the strings in their room)
 constexpr float kPadHall = 1.0f;                // how much of the pad goes into the hall
-constexpr float kNearMix = 0.5f;                // level of the desk-bound room part (both mics summed)
+// Voicing "warm": the long-term colour of warm keyboard string patches against the natural (recorded)
+// colour, measured on the same notes and fitted with 12 bells half an octave apart (dB at Voicing 1).
+constexpr int kVoiceBands = 12;
+constexpr float kVoiceHz[kVoiceBands] = { 125, 180, 260, 380, 560, 820, 1200, 1750, 2550, 3700, 5400, 7900 };
+constexpr float kVoiceDb[kVoiceBands] = { 7.0f, 6.0f, 1.5f, -2.0f, -2.5f, -1.5f, -3.0f, -2.5f, -1.5f, -0.5f, 0.5f, 0.5f };
+constexpr float kVoiceTrimDb = -1.5f;             // keeps the loudness when Voicing is turned up
+constexpr float kPartnerSplit = 0.9f;           // how much the close mics favour one stand partner each (x Width)
+constexpr float kNearMix = 0.7071f;                // level of the desk-bound room part (both mics summed)
 constexpr int kDesks = 4;                       // desks (body + seat) per register
 constexpr int kBuses = kNumRegisters * kDesks;
 constexpr int kMaxVoices = 56;                // 48 playing + 8 spare slots for click-free stealing
@@ -144,6 +151,7 @@ constexpr HallType kHallType[4] = {
 
 struct Player {
     int bus = 0;
+    bool partner = false;                             // the stand partner: the other instrument at the same desk
     double phase = 0;
     float det = 0;                                    // cents
     float vibRate = 5, vibDepth = 10, vibPhase = 0, vibOn = 0.4f;
@@ -180,7 +188,7 @@ struct Voice {
 
 constexpr int kErTaps = 20;
 struct Desk {
-    Convolver body;
+    Convolver body, body2;                            // the two instruments of the desk (stand partners)
     float panL = 0.7f, panR = 0.7f;
     int dDelL = 0, dDelR = 0;                         // arrival time at the left/right mic (spaced pair + row)
     bool back = false;                                // back desk: further away, darker, more room
@@ -190,7 +198,8 @@ struct Desk {
     std::array<int, kErTaps> erDelL {}, erDelR {};
     std::array<float, kErTaps> erGainL {}, erGainR {};
     std::array<float, kErTaps> erBaseL {}, erBaseR {}; // reflections without the side the desk sits on
-    std::vector<float> ring;                          // body output history for reflections
+    std::vector<float> ring;                          // body output history for reflections (both instruments)
+    std::vector<float> ring2;                         // difference of the two instruments (for the close mics)
     int ringPos = 0, ringMask = 0;
     bool active = false;
 };
@@ -260,7 +269,9 @@ struct Engine::Impl {
     Hall halls[4];
     int hallCur = 0, hallPrev = 0, hallTail = 0;     // hall type in use; the previous one rings out
     Biquad eq[2][3];
-    Biquad mute[kBuses][2];                           // con sordino: the mute on the bridge
+    Biquad voice[2][kVoiceBands];                     // voicing: a smooth curve of 12 gentle bells
+    float voiceSet = -1.f; bool voiceOn = false;
+    Biquad mute[kBuses][2], mute2[kBuses][2];         // con sordino: the mute on the bridge (both instruments)
     float muteAmt = 0.f;
     float eqSet[3] = { 1e9f, 1e9f, 1e9f };
     int dblKey = -1;                                  // key of the doubling voice
@@ -270,9 +281,10 @@ struct Engine::Impl {
     Diffuser erDiffL, erDiffR;
     bool sustain = false;
     float expression = 1.f, exprSmooth = 1.f, bend = 1.f;
+    float erSideLp = 0.f, erSideA = 0.f;               // low-passed side signal of the room mics
 
     // chunk buffers
-    std::array<std::array<float, kChunk>, kBuses> busIn {};
+    std::array<std::array<float, kChunk>, kBuses> busIn {}, busIn2 {};
     float dryL[kChunk], dryR[kChunk], erL[kChunk], erR[kChunk], late[kChunk];
     float erLpL = 0, erLpR = 0, erLpA = 0;
     std::vector<float> fifoL, fifoR; int fifoN = 0;
@@ -375,7 +387,7 @@ struct Engine::Impl {
             for (int k = 0; k < kDesks; ++k) {
                 Desk& d = desks[r * kDesks + k];
                 d.body.setIR(makeBody(kReg[r].bodyScale * (1.f + model.bodySpread * (2.f * U(rng) - 1.f)), model.bodyDirect[r], rng, sr));
-                d.ring.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
+                d.ring.assign(ringLen, 0.f); d.ring2.assign(ringLen, 0.f); d.ringMask = ringLen - 1; d.ringPos = 0;
                 d.back = (k % 2) == 1;                                   // every second desk sits further back
                 for (int c = 0; c < 2; ++c) {
                     for (int t = 0; t < kErTaps; ++t) {
@@ -393,6 +405,12 @@ struct Engine::Impl {
                     for (int t = 0; t < kErTaps; ++t) { d.erBaseL[t] *= m / std::sqrt(eL); d.erBaseR[t] *= m / std::sqrt(eR); }
                 }
             }
+        }
+        {   // the stand partners' instruments: another body of the same section, a little different in size
+            std::mt19937 brng(seed * 15485863u + 3u);
+            for (int r = 0; r < kNumRegisters; ++r)
+                for (int k = 0; k < kDesks; ++k)
+                    desks[r * kDesks + k].body2.setIR(makeBody(kReg[r].bodyScale * (1.f + model.bodySpread * (2.f * U(brng) - 1.f)), model.bodyDirect[r], brng, sr));
         }
         // mixed seating: every desk gets its own place anywhere in the room. Stratified: each section has
         // one desk in every quarter of the width and one in every depth row, so a section is spread over
@@ -546,6 +564,7 @@ struct Engine::Impl {
             pl.rng = xorshift(s) | 1u;
             pl.reg = r;
             pl.bus = r * kDesks + deskOrder[(inSec + r) % kDesks];
+            pl.partner = (((inSec / kDesks) + v.key) & 1) != 0;   // alternates also across the notes of a chord
             pl.phase = urand(pl.rng);
             pl.det = gauss(pl.rng) * 6.f;
             pl.vibRate = 4.8f + 1.2f * urand(pl.rng);
@@ -593,13 +612,20 @@ struct Engine::Impl {
         if (!on) for (auto& v : voices) if (v.active && v.sustained) { v.sustained = false; v.released = true; }
     }
 
+    // Low: shelf at 200 Hz (warmth), Mid: bell at 1.4 kHz (where strings sound nasal), High: shelf from 5 kHz
     void updateEq()
     {
         const float want[3] = { p.eqLow, p.eqMid, p.eqHigh };
         for (int b = 0; b < 3; ++b) {
             if (std::fabs(want[b] - eqSet[b]) < 0.01f) continue;
             eqSet[b] = want[b];
-            for (int c = 0; c < 2; ++c) eq[c][b].set(b == 0 ? 0 : b == 1 ? 1 : 2, b == 0 ? 200.f : b == 1 ? 1200.f : 6000.f, want[b], b == 1 ? 0.8f : 0.7071f, sr);
+            for (int c = 0; c < 2; ++c) eq[c][b].set(b == 0 ? 0 : b == 1 ? 1 : 2, b == 0 ? 200.f : b == 1 ? 1400.f : 5000.f, want[b], b == 1 ? 0.8f : 0.7071f, sr);
+        }
+        const float v = std::clamp(p.voicing, 0.f, 1.f);
+        if (std::fabs(v - voiceSet) > 1e-3f || p.voiceCustom) {
+            voiceSet = v; voiceOn = v > 0.f;
+            for (int i = 0; i < kVoiceBands; ++i)
+                for (int c = 0; c < 2; ++c) voice[c][i].set(1, kVoiceHz[i], v * (p.voiceCustom ? p.voiceGain[i] : kVoiceDb[i]), 1.4f, sr);
         }
     }
 
@@ -714,6 +740,7 @@ struct Engine::Impl {
     void renderChunk(float* outL, float* outR)
     {
         for (auto& b : busIn) std::memset(b.data(), 0, sizeof(float) * kChunk);
+        for (auto& b : busIn2) std::memset(b.data(), 0, sizeof(float) * kChunk);
         std::memset(padL, 0, sizeof padL); std::memset(padR, 0, sizeof padR);
         exprSmooth += (expression - exprSmooth) * 0.08f;
         const bool padOn = p.pad > 0.f;
@@ -763,7 +790,7 @@ struct Engine::Impl {
                 float hpX = pl.hpX, hpY = pl.hpY, lpY = pl.lpY;
                 const float lpA = lpAReg[pl.reg];
                 uint32_t rs = pl.rng;
-                float* bus = busIn[pl.bus].data();
+                float* bus = (pl.partner ? busIn2 : busIn)[pl.bus].data();
                 for (int n = 0; n < kChunk; ++n) {
                     inc += dInc; amp += dAmp; mix += dMix; noi += dNoi;
                     ph += inc; if (ph >= 1.0) ph -= 1.0;
@@ -790,31 +817,39 @@ struct Engine::Impl {
         std::memset(erL, 0, sizeof erL); std::memset(erR, 0, sizeof erR);
         float body[kChunk];
         const float erDiff = model.erDiffuse;
+        const float sp = std::clamp(kPartnerSplit * p.width, 0.f, 0.95f), sg = 1.f / std::sqrt(1.f + sp * sp);
         const float muteWant = p.articulation == 1 ? 1.f : 0.f;
-        if (muteAmt == 0.f && muteWant > 0.f) for (auto& m : mute) { m[0].clear(); m[1].clear(); }
+        if (muteAmt == 0.f && muteWant > 0.f) { for (auto& m : mute) { m[0].clear(); m[1].clear(); } for (auto& m : mute2) { m[0].clear(); m[1].clear(); } }
         muteAmt += (muteWant - muteAmt) * 0.03f;
         if (muteAmt < 1e-3f && muteWant == 0.f) muteAmt = 0.f;
         for (int b = 0; b < kBuses; ++b) {
             Desk& d = desks[b];
             if (muteAmt > 0.f) {                               // heavier bridge: the bridge hill (2-4 kHz) is gone, a little nasal
-                float* x = busIn[b].data();
+                float* x = busIn[b].data(); float* x2 = busIn2[b].data();
                 for (int n = 0; n < kChunk; ++n) {
                     const float y = mute[b][1].process(mute[b][0].process(x[n]));
-                    x[n] += muteAmt * (y - x[n]);
+                    const float y2 = mute2[b][1].process(mute2[b][0].process(x2[n]));
+                    x[n] += muteAmt * (y - x[n]); x2[n] += muteAmt * (y2 - x2[n]);
                 }
             }
-            const float* in = busIn[b].data();
-            bool silent = true;
-            for (int n = 0; n < kChunk; ++n) if (in[n] != 0.f) { silent = false; break; }
-            d.active = d.body.process(in, body, silent);
+            const float* in = busIn[b].data(); const float* in2 = busIn2[b].data();
+            bool silent = true, silent2 = true;
+            for (int n = 0; n < kChunk; ++n) { if (in[n] != 0.f) silent = false; if (in2[n] != 0.f) silent2 = false; }
+            float bodyB[kChunk];
+            const bool a1 = d.body.process(in, body, silent), a2 = d.body2.process(in2, bodyB, silent2);
+            d.active = a1 || a2;
             if (!d.active) {
                 // keep the reflection ring decaying correctly: write zeros
-                for (int n = 0; n < kChunk; ++n) { d.ring[d.ringPos] = 0.f; d.ringPos = (d.ringPos + 1) & d.ringMask; }
+                for (int n = 0; n < kChunk; ++n) { d.ring[d.ringPos] = 0.f; d.ring2[d.ringPos] = 0.f; d.ringPos = (d.ringPos + 1) & d.ringMask; }
                 continue;
             }
             for (int n = 0; n < kChunk; ++n) {
-                d.ring[d.ringPos] = body[n];
-                float dl = d.ring[(d.ringPos - d.dDelL) & d.ringMask], dr = d.ring[(d.ringPos - d.dDelR) & d.ringMask];
+                d.ring[d.ringPos] = body[n] + bodyB[n];
+                d.ring2[d.ringPos] = body[n] - bodyB[n];
+                // close mics: the left one a little nearer to one partner, the right one to the other -
+                // wide (the two instruments are independent) and mono-safe (the sum is unchanged)
+                float dl = sg * (d.ring[(d.ringPos - d.dDelL) & d.ringMask] + sp * d.ring2[(d.ringPos - d.dDelL) & d.ringMask]);
+                float dr = sg * (d.ring[(d.ringPos - d.dDelR) & d.ringMask] - sp * d.ring2[(d.ringPos - d.dDelR) & d.ringMask]);
                 d.lpL += d.lpA * (dl - d.lpL); d.lpR += d.lpA * (dr - d.lpR);   // air absorption for back desks
                 dryL[n] += d.panL * d.lpL; dryR[n] += d.panR * d.lpR;
                 float l = 0, r = 0;
@@ -824,15 +859,14 @@ struct Engine::Impl {
                 }
                 // part of the room stays with the desk (the player sits *in* the room), part is spread wide
                 const float c = (1.f - erDiff) * 1.41421356f;
-                // (the part that stays with the desk is taken from both room mics: taken from the left one
-                // only, it added up with the left channel's own reflections and the room leaned left)
-                const float near = kNearMix * (l * d.erUnsideL + r * d.erUnsideR);
-                erL[n] += d.erScale * (c * d.panL * near + erDiff * l);
-                erR[n] += d.erScale * (c * d.panR * near + erDiff * r);
+                // each room mic keeps its own reflections (independent left and right: wide, like a real
+                // spaced room pair) - only the side weighting is taken out of the desk-bound part
+                erL[n] += d.erScale * (c * d.panL * kNearMix * l * d.erUnsideL + erDiff * l);
+                erR[n] += d.erScale * (c * d.panR * kNearMix * r * d.erUnsideR + erDiff * r);
                 d.ringPos = (d.ringPos + 1) & d.ringMask;
             }
         }
-        const float g = model.outGain * std::pow(10.f, p.gainDb / 20.f);
+        const float g = model.outGain * std::pow(10.f, (p.gainDb + std::clamp(p.voicing, 0.f, 1.f) * kVoiceTrimDb) / 20.f);
         if (p.dryOnly) {
             for (int n = 0; n < kChunk; ++n) { outL[n] = g * (dryL[n] + padL[n]); outR[n] = g * (dryR[n] + padR[n]); }
             return;
@@ -844,6 +878,9 @@ struct Engine::Impl {
         for (int n = 0; n < kChunk; ++n) {                     // walls swallow highs
             erLpL += erLpA * (erL[n] - erLpL); erL[n] = erDiffL.process(erLpL);   // dense, not comb-like
             erLpR += erLpA * (erR[n] - erLpR); erR[n] = erDiffR.process(erLpR);
+            // the room is wide, but its bass stays in the middle (below ~180 Hz): nothing cancels in mono
+            const float side = 0.5f * (erL[n] - erR[n]); erSideLp += erSideA * (side - erSideLp);
+            erL[n] -= erSideLp; erR[n] += erSideLp;
             late[n] = 0.5f * ((dryL[n] + eg * erL[n]) + (dryR[n] + eg * erR[n]) + kPadHall * (padL[n] + padR[n]));
             outL[n] = cg * dryL[n] + eg * erL[n] + padL[n];
             outR[n] = cg * dryR[n] + eg * erR[n] + padR[n];
@@ -856,6 +893,7 @@ struct Engine::Impl {
         const bool eqOn = eqSet[0] != 0.f || eqSet[1] != 0.f || eqSet[2] != 0.f;
         for (int n = 0; n < kChunk; ++n) {
             float l = outL[n] * g, r = outR[n] * g;
+            if (voiceOn) for (int i = 0; i < kVoiceBands; ++i) { l = voice[0][i].process(l); r = voice[1][i].process(r); }
             if (eqOn) for (int b = 0; b < 3; ++b) { l = eq[0][b].process(l); r = eq[1][b].process(r); }
             outL[n] = l; outR[n] = r;
         }
@@ -883,7 +921,9 @@ void Engine::prepare(double sampleRate, int maxBlock)
     for (int i = 0; i < 4; ++i)
         d->halls[i].prepare(sampleRate, d->model.hallRt60 * kHallType[i].rt, std::min(0.95f, d->model.hallHf * kHallType[i].hf), kHallType[i].pre);
     for (auto& c : d->eq) for (auto& b : c) b.clear();
-    for (auto& m : d->mute) { m[0].set(1, 2800.f, -11.f, 0.6f, sampleRate); m[1].set(2, 5500.f, -6.f, 0.7071f, sampleRate); }
+    d->erSideA = 1.f - std::exp(-2.f * (float)M_PI * 180.f / (float)sampleRate); d->erSideLp = 0.f;
+    d->voiceSet = -1.f; for (float& e : d->eqSet) e = 1e9f;   // filters are recomputed for this sample rate
+    for (auto* mm : { &d->mute, &d->mute2 }) for (auto& m : *mm) { m[0].set(1, 2800.f, -11.f, 0.6f, sampleRate); m[1].set(2, 5500.f, -6.f, 0.7071f, sampleRate); }
     for (auto& e : d->eqSet) e = 1e9f;
     d->releaseScale = d->model.release;
     d->erDiffL.prepare(sampleRate, { 3.1f, 5.3f, 7.9f, 11.3f }, 0.6f);
@@ -891,6 +931,7 @@ void Engine::prepare(double sampleRate, int maxBlock)
     d->erLpA = 1.f - std::exp(-2.f * (float)M_PI * 5000.f / (float)sampleRate);
     d->fifoL.assign((size_t)maxBlock + kChunk, 0.f); d->fifoR.assign((size_t)maxBlock + kChunk, 0.f);
     reset();
+    d->updateEq();
 }
 
 void Engine::setParams(const Params& p)
@@ -913,7 +954,7 @@ void Engine::setReleaseOverride(float release, float rt60, float hf)
 void Engine::reset()
 {
     for (auto& v : d->voices) v.active = false;
-    for (auto& ds : d->desks) { ds.body.clear(); std::fill(ds.ring.begin(), ds.ring.end(), 0.f); }
+    for (auto& ds : d->desks) { ds.body.clear(); ds.body2.clear(); std::fill(ds.ring.begin(), ds.ring.end(), 0.f); std::fill(ds.ring2.begin(), ds.ring2.end(), 0.f); }
     for (auto& h : d->halls) h.clear();
     d->erDiffL.clear(); d->erDiffR.clear(); d->dblKey = -1;
     d->fifoN = 0; d->sustain = false;

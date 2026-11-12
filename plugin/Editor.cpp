@@ -65,7 +65,7 @@ OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEd
     groups.push_back({ "BOWING", { &knob("attack", "Attack"), &knob("release", "Release"), &knob("vibrato", "Vibrato"),
                                    &knob("unrest", "Unrest"), &knob("rosin", "Rosin"), &knob("detune", "Intonation") } });
     groups.push_back({ "MICROPHONES", { &knob("close", "Close"), &knob("spacing", "Spacing"), &knob("room", "Room"), &knob("hall", "Hall") } });
-    groups.push_back({ "TONE", { &knob("eqLow", "Low"), &knob("eqMid", "Mid"), &knob("eqHigh", "High"), &knob("pad", "Synth pad") } });
+    groups.push_back({ "TONE", { &knob("voicing", "Voicing"), &knob("eqLow", "Low"), &knob("eqMid", "Mid"), &knob("eqHigh", "High"), &knob("pad", "Synth pad") } });
     groups.push_back({ "OUTPUT", { &knob("expression", "Bow pressure"), &knob("gain", "Volume") } });
 
     auto setupCombo = [&](ComboBox& c, Label& l, const char* id, const char* text,

@@ -11,7 +11,7 @@
 //          --solo  --vibrato v  --flutter f0,f1,f2,f3   (learning helpers)
 //          --bassdouble level  --halltype 0..3  --eq low,mid,high (dB)
 //          --set id=value   any plugin parameter by its id (attack, release, vibrato, unrest, rosin, velocity,
-//                           detune, width, seating, pad, spacing, close, room, hall, gain, expression, articulation,
+//                           detune, width, seating, pad, voicing, spacing, close, room, hall, gain, expression, articulation,
 //                           hallType, bassDouble, eqLow, eqMid, eqHigh) – e.g. to render a factory preset
 #include "opensection/Engine.h"
 #include <algorithm>
@@ -76,6 +76,7 @@ int main(int argc, char** argv)
     bool dry = false, bench = false, solo = false, setFlutter = false; float bassDouble = 0, eq[3] = {}; int hallType = 0, articulation = 0; float trem[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0.38f}, pz[5] = {}; bool setTrem = false, setPizz = false; float vibrato = -1, flutter[4] = {}, harmvar = -1, bdir[4] = {}; bool setBody = false; float quality = 1.0f, tail = 4.0f;
     float coupling = -1, detune = -1, rosin = -1, spacing = -1, width = -1;
     std::vector<std::string> sets;
+    float voiceGain[12] = {}; bool voiceCustom = false;
     float unrest[4] = { -1, -1, -1, -1 }; float er = -1, late = -1; float rel = -1, rt60 = -1, hf = -1;
     std::vector<const char*> pos;
     for (int i = 1; i < argc; ++i) {
@@ -107,6 +108,11 @@ int main(int argc, char** argv)
         else if (a == "--trem") { std::sscanf(next(), "%f,%f,%f,%f,%f,%f,%f,%f,%f", &trem[0], &trem[1], &trem[2], &trem[3], &trem[4], &trem[5], &trem[6], &trem[7], &trem[8]); setTrem = true; }
         else if (a == "--pizz") { std::sscanf(next(), "%f,%f,%f,%f,%f", &pz[0], &pz[1], &pz[2], &pz[3], &pz[4]); setPizz = true; }
         else if (a == "--set") sets.push_back(next());
+        else if (a == "--voicegains") {   // 12 values (dB at Voicing 1) instead of the built-in curve, for tuning
+            std::string v = next(); size_t pos = 0;
+            for (int i = 0; i < 12; ++i) { size_t e = v.find(',', pos); voiceGain[i] = (float)std::atof(v.substr(pos, e - pos).c_str()); pos = e == std::string::npos ? v.size() : e + 1; }
+            voiceCustom = true;
+        }
         else if (a == "--eq") std::sscanf(next(), "%f,%f,%f", &eq[0], &eq[1], &eq[2]);
         else if (a == "--release") std::sscanf(next(), "%f,%f,%f", &rel, &rt60, &hf);
         else pos.push_back(argv[i]);
@@ -130,6 +136,7 @@ int main(int argc, char** argv)
     Engine eng(model, seed);
     eng.prepare(sr, block);
     Params p; p.quality = quality; p.dryOnly = dry; p.solo = solo;
+    if (voiceCustom) { p.voiceCustom = true; for (int i = 0; i < 12; ++i) p.voiceGain[i] = voiceGain[i]; }
     if (coupling >= 0) p.coupling = coupling;
     if (vibrato >= 0) p.vibrato = vibrato;
     p.bassDouble = bassDouble; p.hallType = hallType; p.articulation = articulation; p.eqLow = eq[0]; p.eqMid = eq[1]; p.eqHigh = eq[2];
@@ -143,7 +150,7 @@ int main(int argc, char** argv)
         const std::string id = kv.substr(0, eq); const float v = (float)std::atof(kv.c_str() + eq + 1);
         if (id == "attack") p.attack = v; else if (id == "release") p.release = v; else if (id == "vibrato") p.vibrato = v;
         else if (id == "unrest") p.unrest = v; else if (id == "rosin") p.rosin = v; else if (id == "velocity") p.velocity = v;
-        else if (id == "detune") p.detune = v; else if (id == "width") p.width = v; else if (id == "seating") p.seating = v; else if (id == "pad") p.pad = v; else if (id == "spacing") p.spacing = v;
+        else if (id == "detune") p.detune = v; else if (id == "width") p.width = v; else if (id == "seating") p.seating = v; else if (id == "pad") p.pad = v; else if (id == "voicing") p.voicing = v; else if (id == "spacing") p.spacing = v;
         else if (id == "close") p.closeMic = v; else if (id == "room") p.roomMic = v; else if (id == "hall") p.hall = v;
         else if (id == "gain") p.gainDb = v; else if (id == "expression") p.expression = v;
         else if (id == "articulation") p.articulation = (int)v; else if (id == "hallType") p.hallType = (int)v;

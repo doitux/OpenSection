@@ -13,6 +13,9 @@ struct Params {
     // ensemble
     float quality = 0.7f;      // 0.3 (eco) .. 1.0 (studio): players per note
     float width = 1.0f;        // 0 .. 1.5   stereo spread of the desks
+    float voicing = 0.7f;      // 0 .. 1     0 natural (as recorded), 1 warm (keyboard-strings voicing: full low mids, no nasal 2.5-4 kHz)
+    float voiceGain[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };   // dB at Voicing 1 (0: the built-in curve; for tuning only)
+    bool voiceCustom = false;
     float pad = 0.0f;          // 0 .. 1     soft synth pad under the strings (dark, slow, gently moving)
     float seating = 0.5f;      // 0 .. 1     0 each section a tight block, 0.5 orchestra layout, 1 desks mixed through the room
     float spacing = 1.0f;      // 0 .. 2     distance of the two main mics (time differences)
