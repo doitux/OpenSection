@@ -26,6 +26,9 @@ private:
 
     void timerCallback() override;
     Knob& knob(const char* id, const char* text);
+    void refreshPresetBox();                  // factory presets, then the user's own
+    void savePreset();
+    void deletePreset();
 
     OpenSectionProcessor& proc;
     OpenSectionLook look;
@@ -34,6 +37,9 @@ private:
     juce::ComboBox quality, exprSource, articulation, hallType, preset;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> qualityAtt, exprAtt, artAtt, hallAtt;
     juce::Label qualityLabel, exprLabel, artLabel, hallLabel, presetLabel;
+    juce::TextButton savePreset_ { "Save" }, deletePreset_ { juce::String::fromUTF8("\xc3\x97") };
+    juce::StringArray userList;
+    int shownProgram = -1; juce::String shownUser;
     juce::String status;
     float exprShown = 1.f;
 };

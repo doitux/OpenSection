@@ -7,7 +7,7 @@ OpenSection builds an orchestral string section the way a physical-modelling pia
 every player is computed in real time. A few kilobytes of *learned statistics* replace gigabytes of
 recordings.
 
-> Status: **0.2.4** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
+> Status: **0.2.5** (early development) – real-time engine, learning tool and plugin (VST3 / CLAP / LV2 /
 > standalone; AU on macOS) work. The full user interface (stage view, EQ, hall types, presets) is next.
 
 ## How it works
@@ -72,6 +72,15 @@ recordings.
 14. **Checked against two references.** The mid register (g to g'') is compared with two sampled
     sections (VPO and VSCO2-CE). Since 0.2.1 the colour there is within about ±1 dB of both between
     0.7 and 3.6 kHz – a 2–3 dB bump around 2 kHz (heard as a slightly nasal tone) is gone.
+
+### Your own presets
+
+*Save* next to the preset menu stores the current settings under a name of your choice; they appear
+under "My presets" in the menu, × deletes the selected one (after asking). One small XML file per
+preset in `~/.config/OpenSection/Presets` (Windows: `%APPDATA%\OpenSection\Presets`, macOS:
+`~/Library/OpenSection/Presets`) – easy to back up or copy to another computer. Quality and the
+expression-pedal source are your setup and are not part of a preset. Your DAW also stores every knob
+of every instance in the project, so presets are optional.
 
 ### Real-time design
 

@@ -2,6 +2,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "opensection/Engine.h"
+#include "UserPresets.h"
 #include <atomic>
 
 class OpenSectionProcessor : public juce::AudioProcessor {
@@ -34,6 +35,13 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState params;
+
+    // user presets (message thread): files in the user's settings folder
+    UserPresets userPresets;
+    juce::String userPreset;                  // the user preset in use, empty: a factory preset
+    bool loadUserPreset(const juce::String& name);
+    bool saveUserPreset(const juce::String& name);
+    bool deleteUserPreset(const juce::String& name);
 
     // for the editor
     std::atomic<int> uiNotes { 0 }, uiPlayers { 0 };

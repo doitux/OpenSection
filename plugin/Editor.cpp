@@ -80,10 +80,24 @@ OpenSectionEditor::OpenSectionEditor(OpenSectionProcessor& p) : AudioProcessorEd
     setupCombo(exprSource, exprLabel, "exprSource", "Expression pedal", exprAtt);
     setupCombo(articulation, artLabel, "articulation", "Articulation", artAtt);
     setupCombo(hallType, hallLabel, "hallType", "Room", hallAtt);
-    for (int i = 0; i < proc.getNumPrograms(); ++i) preset.addItem(proc.getProgramName(i), i + 1);
-    preset.setSelectedId(proc.getCurrentProgram() + 1, dontSendNotification);
-    preset.onChange = [this] { if (preset.getSelectedId() > 0) proc.applyPreset(preset.getSelectedId() - 1); };
+    refreshPresetBox();
+    preset.onChange = [this] {
+        const int id = preset.getSelectedId();
+        if (id >= 1001 && id - 1001 < userList.size()) proc.loadUserPreset(userList[id - 1001]);
+        else if (id > 0 && id <= proc.getNumPrograms()) {
+            proc.applyPreset(id - 1);
+            proc.updateHostDisplay(AudioProcessorListener::ChangeDetails().withProgramChanged(true));
+        }
+        shownProgram = proc.getCurrentProgram(); shownUser = proc.userPreset;
+        deletePreset_.setEnabled(proc.userPreset.isNotEmpty());
+    };
     addAndMakeVisible(preset);
+    savePreset_.setTooltip("Save the current settings as your own preset");
+    savePreset_.onClick = [this] { savePreset(); };
+    deletePreset_.setTooltip("Delete this preset of yours");
+    deletePreset_.onClick = [this] { deletePreset(); };
+    deletePreset_.setEnabled(proc.userPreset.isNotEmpty());
+    addAndMakeVisible(savePreset_); addAndMakeVisible(deletePreset_);
     presetLabel.setText("Preset", dontSendNotification); presetLabel.setFont(FontOptions(13.f));
     addAndMakeVisible(presetLabel);
 
@@ -101,6 +115,7 @@ void OpenSectionEditor::timerCallback()
     status = String(proc.uiNotes.load()) + " notes  ·  " + String(proc.uiPlayers.load()) + " players  ·  CPU "
            + String(roundToInt(proc.uiLoad.load() * 100.f)) + " %";
     exprShown = proc.uiExpression.load();
+    if (proc.getCurrentProgram() != shownProgram || proc.userPreset != shownUser) refreshPresetBox();   // changed by the host
     repaint(0, 0, getWidth(), 56);
 }
 
@@ -131,6 +146,48 @@ void OpenSectionEditor::paint(Graphics& g)
     }
 }
 
+void OpenSectionEditor::refreshPresetBox()
+{
+    preset.clear(dontSendNotification);
+    for (int i = 0; i < proc.getNumPrograms(); ++i) preset.addItem(proc.getProgramName(i), i + 1);
+    userList = proc.userPresets.list();
+    if (!userList.isEmpty()) {
+        preset.addSeparator();
+        preset.addSectionHeading("My presets");
+        for (int k = 0; k < userList.size(); ++k) preset.addItem(userList[k], 1001 + k);
+    }
+    const int u = userList.indexOf(proc.userPreset);
+    preset.setSelectedId(proc.userPreset.isNotEmpty() && u >= 0 ? 1001 + u : proc.getCurrentProgram() + 1, dontSendNotification);
+    if (proc.userPreset.isNotEmpty() && u < 0) preset.setText(proc.userPreset, dontSendNotification);   // file gone: show the name
+    shownProgram = proc.getCurrentProgram(); shownUser = proc.userPreset;
+    deletePreset_.setEnabled(proc.userPreset.isNotEmpty() && u >= 0);
+}
+
+void OpenSectionEditor::savePreset()
+{
+    proc.userPresets.askName(this, proc.userPreset, [safe = Component::SafePointer<OpenSectionEditor>(this)](String name) {
+        if (safe == nullptr) return;
+        if (!safe->proc.saveUserPreset(name))
+            AlertWindow::showAsync(MessageBoxOptions().withIconType(MessageBoxIconType::WarningIcon).withTitle("Not saved")
+                                       .withMessage("The preset could not be written to\n" + safe->proc.userPresets.folder().getFullPathName())
+                                       .withButton("OK").withAssociatedComponent(safe.getComponent()), [](int) {});
+        safe->refreshPresetBox();
+    });
+}
+
+void OpenSectionEditor::deletePreset()
+{
+    const auto name = proc.userPreset;
+    if (name.isEmpty()) return;
+    UserPresets::askDelete(this, name, [safe = Component::SafePointer<OpenSectionEditor>(this), name] {
+        if (safe == nullptr) return;
+        safe->proc.deleteUserPreset(name);
+        safe->refreshPresetBox();
+        safe->preset.setSelectedId(0, dontSendNotification);                 // the sound stays as it is
+        safe->preset.setText(name + " (deleted)", dontSendNotification);
+    });
+}
+
 void OpenSectionEditor::resized()
 {
     const float s = getWidth() / 820.f;
@@ -138,8 +195,12 @@ void OpenSectionEditor::resized()
     auto r = getLocalBounds().reduced(sc(16));
     auto head = r.removeFromTop(sc(48));
     // preset selector in the header, between title and status
-    auto pr = head.withTrimmedLeft(sc(250)).withWidth(sc(300)).withSizeKeepingCentre(sc(300), sc(26));
-    presetLabel.setBounds(pr.removeFromLeft(sc(52)));
+    auto pr = head.withTrimmedLeft(sc(236)).withWidth(sc(346)).withSizeKeepingCentre(sc(346), sc(26));
+    presetLabel.setBounds(pr.removeFromLeft(sc(50)));
+    deletePreset_.setBounds(pr.removeFromRight(sc(26)));
+    pr.removeFromRight(sc(4));
+    savePreset_.setBounds(pr.removeFromRight(sc(46)));
+    pr.removeFromRight(sc(6));
     preset.setBounds(pr);
     auto bottom = r.removeFromBottom(sc(36));
     r.removeFromBottom(sc(8));

@@ -96,6 +96,7 @@ void OpenSectionProcessor::applyPreset(int i)
 {
     if (i < 0 || i >= getNumPrograms()) return;
     currentProgram = i;
+    userPreset.clear();
     for (auto* prm : getParameters())
         if (auto* r = dynamic_cast<RangedAudioParameter*>(prm)) {
             if (r->getParameterID() == ids::exprSource || r->getParameterID() == ids::quality) continue;   // the player's setup stays
@@ -103,6 +104,27 @@ void OpenSectionProcessor::applyPreset(int i)
             for (auto& kv : presets()[(size_t)i].values) if (r->getParameterID() == kv.first) v = kv.second;
             r->setValueNotifyingHost(r->convertTo0to1(v));
         }
+}
+
+bool OpenSectionProcessor::loadUserPreset(const String& name)
+{
+    if (!userPresets.load(name, *this)) return false;
+    userPreset = name;
+    return true;
+}
+
+bool OpenSectionProcessor::saveUserPreset(const String& name)
+{
+    if (!userPresets.save(name, *this, JucePlugin_VersionString)) return false;
+    userPreset = File::createLegalFileName(name.trim());
+    return true;
+}
+
+bool OpenSectionProcessor::deleteUserPreset(const String& name)
+{
+    if (!userPresets.remove(name)) return false;
+    if (userPreset == name) userPreset.clear();
+    return true;
 }
 
 APVTS::ParameterLayout OpenSectionProcessor::layout()
@@ -154,6 +176,7 @@ APVTS::ParameterLayout OpenSectionProcessor::layout()
 OpenSectionProcessor::OpenSectionProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", AudioChannelSet::stereo(), true)),
       params(*this, nullptr, "OpenSection", layout()),
+      userPresets("OpenSection", { ids::exprSource, ids::quality }),
       engine(opensection::Model::builtin())
 {
     events.reserve(2048);
@@ -248,6 +271,7 @@ void OpenSectionProcessor::getStateInformation(MemoryBlock& destData)
     std::unique_ptr<XmlElement> xml(state.createXml());
     xml->setAttribute("program", currentProgram);
     xml->setAttribute("programName", getProgramName(currentProgram));   // indices may move when presets are added
+    xml->setAttribute("userPreset", userPreset);
     copyXmlToBinary(*xml, destData);
 }
 
@@ -264,7 +288,8 @@ void OpenSectionProcessor::setStateInformation(const void* data, int sizeInBytes
         if (name.isEmpty() && idx >= 0 && idx < 8) name = String::fromUTF8(list020[idx]);
         currentProgram = 0;
         for (int i = 0; i < getNumPrograms(); ++i) if (getProgramName(i) == name) currentProgram = i;
-        xml->removeAttribute("program"); xml->removeAttribute("programName");
+        userPreset = xml->getStringAttribute("userPreset");
+        xml->removeAttribute("program"); xml->removeAttribute("programName"); xml->removeAttribute("userPreset");
         params.replaceState(ValueTree::fromXml(*xml));
     }
 }
